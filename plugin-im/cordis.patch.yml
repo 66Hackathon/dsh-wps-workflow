@@ -1,0 +1,9 @@
+- insert:
+    - id: dsh-wps
+      name: '@66hackathon/dsh-wps'
+      config:
+        # workspace: absolute path (default: host process cwd)
+        # agentPreset: optional default preset
+        # language: zh | en
+        # rpcAuthority: loopback | trusted-host
+        # harnessBaseUrl: optional external harness URL

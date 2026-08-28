@@ -1,0 +1,82 @@
+{
+  "name": "@66hackathon/dsh-wps",
+  "version": "1.0.0",
+  "description": "WPS 协作 IM 机器人渠道：群聊 @ 机器人或私聊驱动本机 DeepSeek Harness 回答。",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "wps",
+    "kdocs",
+    "im",
+    "chatbot"
+  ],
+  "author": {
+    "name": "66Hackathon",
+    "url": "https://github.com/66Hackathon"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/66Hackathon/dsh-wps-workflow.git",
+    "directory": "plugin-im"
+  },
+  "bugs": {
+    "url": "https://github.com/66Hackathon/dsh-wps-workflow/issues"
+  },
+  "homepage": "https://github.com/66Hackathon/dsh-wps-workflow#readme",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "cordis.patch.yml",
+    "lib",
+    "plugin-src",
+    "scripts",
+    "src",
+    "README.md",
+    "IMPLEMENTATION.md"
+  ],
+  "bin": {
+    "dsh-wps": "bin/dsh-wps.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node plugin-src/client/build.mjs && node plugin-src/host/build.mjs",
+    "test": "node --test test/channels/wps/*.test.mjs",
+    "test:wps": "node --test test/channels/wps/*.test.mjs",
+    "wps:verify": "node scripts/wps-debug.mjs verify",
+    "wps:stream-test": "node scripts/wps-stream-test.mjs",
+    "wps:simulate": "node scripts/wps-debug.mjs simulate",
+    "wps:listen": "node scripts/wps-debug.mjs listen",
+    "wps:echo": "node scripts/wps-debug.mjs echo",
+    "check": "npm run build && npm test"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.9",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  }
+}
