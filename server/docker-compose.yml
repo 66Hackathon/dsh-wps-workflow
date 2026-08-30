@@ -1,0 +1,33 @@
+# TeamSpace 本地开发：仅启动 MySQL。
+# 应用在宿主机运行：cp .env.example .env && make run
+#
+# 数据库账号、密码、库名、端口均来自同目录 .env（Compose 自动加载）。
+# 数据持久化在 ./data/mysql（已 gitignore）。
+# 空目录首次 up：自动执行 deploy/mysql/schema.sql（全量建表）。
+# 已有数据卷：make mysql-init 会 DROP + CREATE 重建全部表（含演示种子）。
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: teamspace-mysql
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${TEAMSPACE_DB_PASSWORD}
+      MYSQL_DATABASE: ${TEAMSPACE_DB_NAME:-teamspace}
+      TZ: UTC
+    ports:
+      - "${TEAMSPACE_DB_PORT:-3306}:3306"
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+      - ./deploy/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${TEAMSPACE_DB_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
