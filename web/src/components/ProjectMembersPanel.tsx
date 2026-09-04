@@ -9,6 +9,8 @@ import {
   userDisplayName,
 } from '../memberRoles';
 import type { OrgUser, ProjectMember } from '../types';
+import { addWpsContactsToProject } from '../wpsContacts';
+import { WpsContactsPickerDialog } from './wps/WpsContactsPickerDialog';
 
 interface Props {
   projectId: number;
@@ -97,6 +99,7 @@ function AddMemberDialog({ projectId, memberUserIds, onClose, onAdded }: AddMemb
   const [selectedUser, setSelectedUser] = useState<OrgUser | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showContactsPicker, setShowContactsPicker] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -158,12 +161,21 @@ function AddMemberDialog({ projectId, memberUserIds, onClose, onAdded }: AddMemb
   const selectedLabel = selectedUser ? displayUserName(selectedUser) : '';
 
   return (
+    <>
     <DialogShell
       title="新增成员"
-      subtitle="从系统用户中选择成员加入项目，新增成员默认为普通成员。"
+      subtitle="从系统用户或 WPS 通讯录中选择成员加入项目，新增成员默认为普通成员。"
       onClose={onClose}
       actions={(
         <>
+          <button
+            type="button"
+            className="tsw-btn"
+            onClick={() => setShowContactsPicker(true)}
+            disabled={submitting}
+          >
+            从通讯录选择
+          </button>
           <button type="button" className="tsw-btn" onClick={onClose} disabled={submitting}>
             取消
           </button>
@@ -255,6 +267,19 @@ function AddMemberDialog({ projectId, memberUserIds, onClose, onAdded }: AddMemb
 
       {error ? <p className="tsw-error">{error}</p> : null}
     </DialogShell>
+
+    {showContactsPicker ? (
+      <WpsContactsPickerDialog
+        multiple
+        onClose={() => setShowContactsPicker(false)}
+        onConfirm={async (contacts) => {
+          await addWpsContactsToProject(projectId, contacts);
+          await onAdded();
+          onClose();
+        }}
+      />
+    ) : null}
+    </>
   );
 }
 

@@ -11,7 +11,7 @@ export interface RequirementRoleAssignment {
   userId: number;
 }
 
-export const UNIQUE_REQUIREMENT_ROLE_HINT = '同一需求中，每人只能承担一种职能角色';
+export const UNIQUE_REQUIREMENT_ROLE_HINT = '同一需求中，产品 / 研发 / 测试可由同一人兼任';
 
 const SLOT_LABELS: Record<RequirementRoleSlot, string> = {
   PRODUCT_OWNER: '产品负责人',
@@ -49,12 +49,12 @@ export function buildRequirementRoleAssignments(
 export function requirementRoleDraftFromRequirement(
   requirement: Pick<
     Requirement,
-    'product_owner_user_id' | 'developer_user_id' | 'backend_developer_user_id' | 'tester_user_id'
+    'created_by' | 'product_owner_user_id' | 'developer_user_id' | 'backend_developer_user_id' | 'tester_user_id'
   >,
   overrides?: Pick<RequirementRoleDraft, 'frontendUserId' | 'backendUserId' | 'testerUserId'>,
 ): RequirementRoleDraft {
   return {
-    productOwnerUserId: requirement.product_owner_user_id,
+    productOwnerUserId: requirement.created_by || requirement.product_owner_user_id,
     frontendUserId: overrides?.frontendUserId ?? requirement.developer_user_id,
     backendUserId: overrides?.backendUserId ?? requirement.backend_developer_user_id,
     testerUserId: overrides?.testerUserId ?? requirement.tester_user_id,
@@ -62,49 +62,52 @@ export function requirementRoleDraftFromRequirement(
 }
 
 export function findDuplicateRequirementRoleUser(
-  assignments: RequirementRoleAssignment[],
+  _assignments: RequirementRoleAssignment[],
 ): { userId: number; slots: RequirementRoleSlot[] } | null {
-  const slotByUser = new Map<number, RequirementRoleSlot[]>();
-  for (const item of assignments) {
-    const slots = slotByUser.get(item.userId) ?? [];
-    slots.push(item.slot);
-    slotByUser.set(item.userId, slots);
-  }
-  for (const [userId, slots] of slotByUser) {
-    if (slots.length > 1) {
-      return { userId, slots };
-    }
-  }
+  // 允许同一人兼任产品 / 研发 / 测试
   return null;
 }
 
-export function validateUniqueRequirementRoles(draft: RequirementRoleDraft): string | null {
-  const duplicate = findDuplicateRequirementRoleUser(buildRequirementRoleAssignments(draft));
-  if (!duplicate) return null;
-  const labels = duplicate.slots.map((slot) => SLOT_LABELS[slot]).join('、');
-  return `${UNIQUE_REQUIREMENT_ROLE_HINT}（该成员已担任：${labels}）`;
+export function validateUniqueRequirementRoles(_draft: RequirementRoleDraft): string | null {
+  return null;
 }
 
 export function excludeUserIdsForDevAssignPicker(
-  draft: RequirementRoleDraft,
-  pickingSlot: 'frontend' | 'backend' | 'tester',
+  _draft: RequirementRoleDraft,
+  _pickingSlot: 'frontend' | 'backend' | 'tester',
 ): number[] {
-  const excluded = new Set<number>();
-  if (draft.productOwnerUserId) excluded.add(draft.productOwnerUserId);
-  if (pickingSlot !== 'frontend' && draft.frontendUserId) excluded.add(draft.frontendUserId);
-  if (pickingSlot !== 'backend' && draft.backendUserId) excluded.add(draft.backendUserId);
-  if (pickingSlot !== 'tester' && draft.testerUserId) excluded.add(draft.testerUserId);
-  return [...excluded];
+  return [];
+}
+
+/** 返回用户在该需求上匹配的全部职能角色（可兼任） */
+export function resolveUserRequirementRoleSlots(
+  userId: number | undefined,
+  draft: RequirementRoleDraft,
+): RequirementRoleSlot[] {
+  if (!userId) return [];
+  const slots: RequirementRoleSlot[] = [];
+  if (draft.productOwnerUserId === userId) slots.push('PRODUCT_OWNER');
+  if (draft.frontendUserId === userId) slots.push('FRONTEND_DEVELOPER');
+  if (draft.backendUserId === userId) slots.push('BACKEND_DEVELOPER');
+  if (draft.testerUserId === userId) slots.push('TESTER');
+  return slots;
 }
 
 export function resolveUserRequirementRoleSlot(
   userId: number | undefined,
   draft: RequirementRoleDraft,
 ): RequirementRoleSlot | null {
-  if (!userId) return null;
-  if (draft.productOwnerUserId === userId) return 'PRODUCT_OWNER';
-  if (draft.frontendUserId === userId) return 'FRONTEND_DEVELOPER';
-  if (draft.backendUserId === userId) return 'BACKEND_DEVELOPER';
-  if (draft.testerUserId === userId) return 'TESTER';
-  return null;
+  return resolveUserRequirementRoleSlots(userId, draft)[0] ?? null;
+}
+
+export function userHasRequirementRoleSlot(
+  userId: number | undefined,
+  draft: RequirementRoleDraft,
+  slot: RequirementRoleSlot,
+): boolean {
+  return resolveUserRequirementRoleSlots(userId, draft).includes(slot);
+}
+
+export function requirementRoleSlotLabel(slot: RequirementRoleSlot): string {
+  return SLOT_LABELS[slot];
 }

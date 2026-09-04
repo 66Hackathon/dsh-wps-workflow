@@ -324,13 +324,12 @@ func sessionFromContext(ctx context.Context) (*session.Record, bool) {
 
 func repositoryUserToSessionUser(user repository.User) session.User {
 	return session.User{
-		ID:             user.ID,
-		WPSUserID:      user.WPSUserID,
-		Name:           user.Name,
-		NickName:       user.NickName,
-		AvatarURL:      user.AvatarURL,
-		CompanyName:    user.CompanyName,
-		OrganizationID: user.OrganizationID,
-		AccountState:   user.AccountState,
+		ID:           user.ID,
+		WPSUserID:    user.WPSUserID,
+		Name:         user.Name,
+		NickName:     user.NickName,
+		AvatarURL:    user.AvatarURL,
+		CompanyName:  user.CompanyName,
+		AccountState: user.AccountState,
 	}
 }

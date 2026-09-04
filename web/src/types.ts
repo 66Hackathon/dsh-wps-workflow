@@ -5,7 +5,6 @@ export interface TeamspaceUser {
   nick_name?: string;
   avatar_url?: string;
   company_name?: string;
-  organization_id: number;
   account_state: string;
 }
 
@@ -40,16 +39,37 @@ export interface Project {
   status: string;
   owner_user_id?: number;
   members?: ProjectMember[];
-  git_repo_url?: string;
-  git_default_branch?: string;
+  repositories?: ProjectRepository[];
+  repository_count?: number;
   wps_group_id?: string;
   wps_group_name?: string;
+  wps_doc_folder_id?: string;
   created_by?: number;
   created_at?: string;
   updated_at?: string;
   requirement_count?: number;
   bug_count?: number;
 }
+
+export type DevDirection = 'FRONTEND' | 'BACKEND' | 'MOBILE';
+
+export interface ProjectRepository {
+  id: number;
+  project_id: number;
+  repo_url: string;
+  default_branch: string;
+  dev_direction: DevDirection;
+  dev_direction_label?: string;
+  sort_order?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const DEV_DIRECTION_OPTIONS: { value: DevDirection; label: string }[] = [
+  { value: 'FRONTEND', label: '前端' },
+  { value: 'BACKEND', label: '后端' },
+  { value: 'MOBILE', label: '移动端' },
+];
 
 export interface ProjectMember {
   id: number;
@@ -71,19 +91,24 @@ export interface Requirement {
   id: number;
   project_id: number;
   requirement_code: string;
+  item_type?: string;
   title: string;
   description?: string;
   priority: string;
-  development_scope: string;
+  development_scope?: string;
   current_status: string;
   status_version: number;
+  created_by?: number;
   product_owner_user_id?: number;
+  /** FRONTEND,BACKEND */
+  dev_directions?: string;
   developer_user_id?: number;
   backend_developer_user_id?: number;
   tester_user_id?: number;
+  parent_item_id?: number;
   parent_requirement_id?: number;
-  frontend_development_completed: boolean;
-  backend_development_completed: boolean;
+  frontend_development_completed?: boolean;
+  backend_development_completed?: boolean;
   updated_at?: string;
 }
 
@@ -97,6 +122,7 @@ export interface RequirementStageSubmission {
   review_result?: string;
   review_comment?: string;
   reviewer_user_id?: number;
+  dev_design_doc?: string;
   dev_summary?: string;
   implementation_notes?: string;
   developer_user_id?: number;
@@ -178,29 +204,8 @@ export interface WorkspaceSummary {
   };
 }
 
-export interface Conversation {
-  id: number;
-  project_id: number;
-  requirement_id?: number;
-  bug_id?: number;
-  creator_user_id: number;
-  title: string;
-  conversation_type: string;
-  status: string;
-}
-
-export interface ConversationMessage {
-  id: number;
-  conversation_id: number;
-  role: 'USER' | 'ASSISTANT' | 'SYSTEM' | 'TOOL' | string;
-  content: string;
-  status: string;
-  model_name?: string;
-  created_at?: string;
-}
-
 /** 顶层导航（设计文档 §七） */
-export type TopNav = 'projects' | 'conversations' | 'workspace' | 'settings';
+export type TopNav = 'projects' | 'workspace' | 'settings';
 
 /** 项目空间子导航 */
 export type ProjectTab =
@@ -209,8 +214,7 @@ export type ProjectTab =
   | 'documents'
   | 'members'
   | 'repository'
-  | 'group'
-  | 'conversations';
+  | 'group';
 
 export const PROJECT_TAB_LABELS: Record<ProjectTab, string> = {
   overview: '项目概览',
@@ -219,24 +223,23 @@ export const PROJECT_TAB_LABELS: Record<ProjectTab, string> = {
   members: '成员',
   repository: '代码仓库',
   group: '项目群',
-  conversations: '会话',
 };
 
 export const TOP_NAV_LABELS: Record<TopNav, string> = {
   projects: '项目空间',
-  conversations: '会话',
   workspace: '工作区',
   settings: '设置',
 };
 
 export const REQUIREMENT_STATUS_LABELS: Record<string, string> = {
-  PRODUCT_EDITING: '产品设计中',
-  PRODUCT_REVIEW: '待研发分配',
+  CREATED: '产品设计',
+  PRODUCT_DESIGN: '产品设计',
+  DEV_DESIGN: '研发方案',
   DEVELOPMENT: '研发中',
   TESTING: '测试中',
-  BUG_FIXING: 'Bug修复中',
-  DONE: '待验收',
-  ARCHIVED: '已归档',
+  PRODUCT_ACCEPTANCE: '产品验收',
+  REGRESSION: '回归测试',
+  CLOSED: '已关闭',
 };
 
 export const PROJECT_ROLE_LABELS: Record<string, string> = {

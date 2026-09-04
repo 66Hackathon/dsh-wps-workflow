@@ -1,5 +1,5 @@
 import type { RequirementRoleDraft } from './requirementRoles';
-import { resolveUserRequirementRoleSlot } from './requirementRoles';
+import { userHasRequirementRoleSlot } from './requirementRoles';
 import type { ProjectMember, Requirement } from './types';
 
 export type TestPhaseViewRole = 'tester' | 'product' | 'developer' | 'observer';
@@ -40,14 +40,14 @@ export function resolveTestPhaseView(
   }
 
   const roleDraft: RequirementRoleDraft = {
-    productOwnerUserId: requirement.product_owner_user_id,
+    productOwnerUserId: requirement.created_by || requirement.product_owner_user_id,
     frontendUserId: frontendUserId ?? requirement.developer_user_id,
     backendUserId: backendUserId ?? requirement.backend_developer_user_id,
     testerUserId: requirement.tester_user_id,
   };
-  const slot = resolveUserRequirementRoleSlot(currentUserId, roleDraft);
 
-  if (slot === 'TESTER') {
+  // 兼任时优先按当前阶段职责：测试中以测试负责人身份操作
+  if (userHasRequirementRoleSlot(currentUserId, roleDraft, 'TESTER')) {
     return {
       role: 'tester',
       viewLabel: VIEW_LABELS.tester,
@@ -55,15 +55,7 @@ export function resolveTestPhaseView(
     };
   }
 
-  if (slot === 'PRODUCT_OWNER') {
-    return {
-      role: 'product',
-      viewLabel: VIEW_LABELS.product,
-      canAdvance: false,
-    };
-  }
-
-  if (slot === 'FRONTEND_DEVELOPER') {
+  if (userHasRequirementRoleSlot(currentUserId, roleDraft, 'FRONTEND_DEVELOPER')) {
     return {
       role: 'developer',
       track: 'frontend',
@@ -72,11 +64,19 @@ export function resolveTestPhaseView(
     };
   }
 
-  if (slot === 'BACKEND_DEVELOPER') {
+  if (userHasRequirementRoleSlot(currentUserId, roleDraft, 'BACKEND_DEVELOPER')) {
     return {
       role: 'developer',
       track: 'backend',
       viewLabel: TRACK_VIEW_LABELS.backend,
+      canAdvance: false,
+    };
+  }
+
+  if (userHasRequirementRoleSlot(currentUserId, roleDraft, 'PRODUCT_OWNER')) {
+    return {
+      role: 'product',
+      viewLabel: VIEW_LABELS.product,
       canAdvance: false,
     };
   }

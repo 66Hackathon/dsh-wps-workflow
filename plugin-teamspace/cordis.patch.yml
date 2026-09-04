@@ -1,0 +1,9 @@
+- insert:
+    - id: teamspace-tools
+      name: "@66hackathon/dsh-teamspace"
+      config:
+        baseUrl: "http://127.0.0.1:8090"
+        token: ""
+        autoDevLogin: true
+        devUserId: 1
+        timeoutMs: 15000

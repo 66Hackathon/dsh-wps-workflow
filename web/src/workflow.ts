@@ -67,7 +67,7 @@ export const WORKFLOW_STEPS: WorkflowStepDef[] = [
     id: 'create-requirement',
     title: '创建需求',
     summary: '录入需求标题与描述，进入产品编辑状态。',
-    demoNote: 'Demo 已打通：三步向导创建需求并指定产品负责人。',
+    demoNote: 'Demo 已打通：三步向导创建需求，创建者为产品，并指定研发与测试负责人。',
   },
   {
     id: 'create-group',

@@ -11,14 +11,13 @@ import (
 
 // User is the authenticated TeamSpace user exposed to clients.
 type User struct {
-	ID             uint64 `json:"id"`
-	WPSUserID      string `json:"wps_user_id"`
-	Name           string `json:"name"`
-	NickName       string `json:"nick_name,omitempty"`
-	AvatarURL      string `json:"avatar_url,omitempty"`
-	CompanyName    string `json:"company_name,omitempty"`
-	OrganizationID uint64 `json:"organization_id"`
-	AccountState   string `json:"account_state"`
+	ID           uint64 `json:"id"`
+	WPSUserID    string `json:"wps_user_id"`
+	Name         string `json:"name"`
+	NickName     string `json:"nick_name,omitempty"`
+	AvatarURL    string `json:"avatar_url,omitempty"`
+	CompanyName  string `json:"company_name,omitempty"`
+	AccountState string `json:"account_state"`
 }
 
 // Record holds a system session (Bearer token).
@@ -53,14 +52,13 @@ type SessionRow struct {
 
 // UserProfile is the DB user view attached to a session.
 type UserProfile struct {
-	ID             uint64
-	WPSUserID      string
-	Name           string
-	NickName       string
-	AvatarURL      string
-	CompanyName    string
-	OrganizationID uint64
-	AccountState   string
+	ID           uint64
+	WPSUserID    string
+	Name         string
+	NickName     string
+	AvatarURL    string
+	CompanyName  string
+	AccountState string
 }
 
 // Manager stores OAuth state in memory and sessions through an optional store.
@@ -239,14 +237,13 @@ func (s *RepoStore) DeleteSession(ctx context.Context, id string) error {
 
 func userFromProfile(profile UserProfile) User {
 	return User{
-		ID:             profile.ID,
-		WPSUserID:      profile.WPSUserID,
-		Name:           profile.Name,
-		NickName:       profile.NickName,
-		AvatarURL:      profile.AvatarURL,
-		CompanyName:    profile.CompanyName,
-		OrganizationID: profile.OrganizationID,
-		AccountState:   profile.AccountState,
+		ID:           profile.ID,
+		WPSUserID:    profile.WPSUserID,
+		Name:         profile.Name,
+		NickName:     profile.NickName,
+		AvatarURL:    profile.AvatarURL,
+		CompanyName:  profile.CompanyName,
+		AccountState: profile.AccountState,
 	}
 }
 

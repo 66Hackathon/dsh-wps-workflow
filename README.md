@@ -7,6 +7,7 @@
 | [`web/`](web/) | 独立 React SPA（项目空间 UI，中文） |
 | [`server/`](server/) | Go REST API、WPS OAuth、MySQL |
 | [`plugin-im/`](plugin-im/) | DSH 插件：WPS IM 机器人渠道 |
+| [`plugin-teamspace/`](plugin-teamspace/) | DSH Agent Tools：按需拉取 TeamSpace 业务上下文 |
 | [`deepseek-harness/`](deepseek-harness/) | DeepSeek Harness 上游源码（可选） |
 
 **第一版不依赖 `dsh web`**。后续 AI 能力由 `server/` 集成 Harness SDK，而非嵌入 DSH 前端。

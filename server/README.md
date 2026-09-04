@@ -108,7 +108,7 @@ make run
 | `WPS_OAUTH_CLIENT_ID` | — | WPS 应用 AppID |
 | `WPS_OAUTH_CLIENT_SECRET` | — | WPS 应用 AppSecret |
 | `WPS_OAUTH_REDIRECT_URI` | — | 授权回调（须与 WPS 后台一致，推荐 `http://127.0.0.1:8090/api/auth/callback`） |
-| `WPS_OAUTH_SCOPE` | `kso.user_base.read` | OAuth scope |
+| `WPS_OAUTH_SCOPE` | `kso.user_base.read kso.file.search` | 用户 OAuth scope（文档搜索依赖用户 Token） |
 | `WPS_OAUTH_SIGNATURE_ENABLED` | `true` | 是否对 `/v7/users/current` 使用 KSO-1 签名 |
 | `WPS_OAUTH_REFRESH_LEAD_SEC` | `300` | access_token 到期前多少秒自动续期 |
 | `TEAMSPACE_SESSION_SECRET` | `change-me-in-production` | Session 密钥（预留） |

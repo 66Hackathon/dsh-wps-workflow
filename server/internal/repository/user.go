@@ -51,14 +51,14 @@ func (r *Repository) mapUserDisplayNames(ctx context.Context, userIDs []uint64) 
 }
 
 const userSelectColumns = `
-	id, wps_user_id, name, IFNULL(nick_name, ''), IFNULL(avatar_url, ''), IFNULL(company_name, ''), organization_id, account_state
+	id, wps_user_id, name, IFNULL(nick_name, ''), IFNULL(avatar_url, ''), IFNULL(company_name, ''), account_state
 `
 
 func scanUser(row scanner) (User, error) {
 	var user User
 	err := row.Scan(
 		&user.ID, &user.WPSUserID, &user.Name, &user.NickName, &user.AvatarURL, &user.CompanyName,
-		&user.OrganizationID, &user.AccountState,
+		&user.AccountState,
 	)
 	if err != nil {
 		return User{}, err
@@ -118,25 +118,3 @@ func (r *Repository) ListAllUsers(ctx context.Context) ([]OrgUser, error) {
 	return items, rows.Err()
 }
 
-// ListOrganizationUsers returns active users in an organization.
-func (r *Repository) ListOrganizationUsers(ctx context.Context, organizationID uint64) ([]OrgUser, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, IFNULL(nick_name, ''), IFNULL(email, '')
-		FROM users
-		WHERE organization_id = ? AND account_state = 'ACTIVE'
-		ORDER BY id`, organizationID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := make([]OrgUser, 0)
-	for rows.Next() {
-		var item OrgUser
-		if err := rows.Scan(&item.ID, &item.Name, &item.NickName, &item.Email); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}

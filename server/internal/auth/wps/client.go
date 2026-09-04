@@ -107,9 +107,10 @@ type userInfoResponse struct {
 
 // Client calls WPS OAuth and user APIs.
 type Client struct {
-	cfg    config.WPSOAuthConfig
-	signer *kso1.Signer
-	http   *http.Client
+	cfg         config.WPSOAuthConfig
+	signer      *kso1.Signer
+	http        *http.Client
+	tenantCache tenantTokenCache
 }
 
 // NewClient builds a WPS API client from configuration.

@@ -20,11 +20,12 @@ type ProjectMember struct {
 	JoinedAt  string   `json:"joined_at,omitempty"`
 }
 
-// ProjectDetail extends Project with members.
+// ProjectDetail extends Project with members and repositories.
 type ProjectDetail struct {
 	Project
-	OwnerUserID uint64          `json:"owner_user_id"`
-	Members     []ProjectMember `json:"members"`
+	OwnerUserID  uint64              `json:"owner_user_id"`
+	Members      []ProjectMember     `json:"members"`
+	Repositories []ProjectRepository `json:"repositories,omitempty"`
 }
 
 // GetProject returns a project by id.
@@ -32,15 +33,13 @@ func (r *Repository) GetProject(ctx context.Context, projectID uint64) (ProjectD
 	var detail ProjectDetail
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, project_code, name, IFNULL(description, ''), status, owner_user_id,
-		       IFNULL(git_repo_url, ''), IFNULL(git_default_branch, ''),
 		       IFNULL(wps_group_id, ''), IFNULL(wps_group_name, ''),
 		       created_by,
 		       DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ'),
 		       DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ')
 		FROM projects WHERE id = ? AND status = 'ACTIVE'`, projectID).
 		Scan(&detail.ID, &detail.ProjectCode, &detail.Name, &detail.Description, &detail.Status,
-			&detail.OwnerUserID, &detail.GitRepoURL, &detail.GitDefaultBranch,
-			&detail.WPSGroupID, &detail.WPSGroupName,
+			&detail.OwnerUserID, &detail.WPSGroupID, &detail.WPSGroupName,
 			&detail.CreatedBy, &detail.CreatedAt, &detail.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -60,6 +59,10 @@ func (r *Repository) GetProject(ctx context.Context, projectID uint64) (ProjectD
 	}
 	detail.RequirementCount = reqCount
 	detail.BugCount = bugCount
+	if err := r.attachProjectRepositories(ctx, &detail); err != nil {
+		return ProjectDetail{}, err
+	}
+	detail.RepositoryCount = len(detail.Repositories)
 	return detail, nil
 }
 
@@ -120,10 +123,10 @@ func (r *Repository) attachProjectListExtras(ctx context.Context, projects []Pro
 
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT project_id,
-		       SUM(CASE WHEN development_scope = 'BUG_FIX' THEN 1 ELSE 0 END),
-		       SUM(CASE WHEN development_scope <> 'BUG_FIX' THEN 1 ELSE 0 END)
+		       SUM(CASE WHEN item_type = 'BUG' THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN item_type = 'REQUIREMENT' THEN 1 ELSE 0 END)
 		FROM requirements
-		WHERE archived_at IS NULL AND project_id IN (`+placeholders(len(ids))+`)
+		WHERE closed_at IS NULL AND project_id IN (`+placeholders(len(ids))+`)
 		GROUP BY project_id`, uint64Args(ids)...)
 	if err != nil {
 		return err
@@ -147,10 +150,10 @@ func (r *Repository) projectItemCounts(ctx context.Context, projectID uint64) (i
 	var reqCount, bugCount int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT
-		  COALESCE(SUM(CASE WHEN development_scope <> 'BUG_FIX' THEN 1 ELSE 0 END), 0),
-		  COALESCE(SUM(CASE WHEN development_scope = 'BUG_FIX' THEN 1 ELSE 0 END), 0)
+		  COALESCE(SUM(CASE WHEN item_type = 'REQUIREMENT' THEN 1 ELSE 0 END), 0),
+		  COALESCE(SUM(CASE WHEN item_type = 'BUG' THEN 1 ELSE 0 END), 0)
 		FROM requirements
-		WHERE project_id = ? AND archived_at IS NULL`, projectID).
+		WHERE project_id = ? AND closed_at IS NULL`, projectID).
 		Scan(&reqCount, &bugCount)
 	if err != nil {
 		return 0, 0, err
@@ -188,12 +191,11 @@ func encodeRoleCodes(codes []string) (string, error) {
 
 // CreateProjectInput holds fields for creating a project.
 type CreateProjectInput struct {
-	OrganizationID uint64
-	ProjectCode    string
-	Name           string
-	Description    string
-	OwnerUserID    uint64
-	CreatedBy      uint64
+	ProjectCode string
+	Name        string
+	Description string
+	OwnerUserID uint64
+	CreatedBy   uint64
 }
 
 // CreateProject inserts a new project and owner membership. Returns the new project id.
@@ -205,10 +207,9 @@ func (r *Repository) CreateProject(ctx context.Context, input CreateProjectInput
 	defer func() { _ = tx.Rollback() }()
 
 	result, err := tx.ExecContext(ctx, `
-		INSERT INTO projects (organization_id, project_code, name, description, owner_user_id, status, setup_status, created_by)
-		VALUES (?, ?, ?, ?, ?, 'ACTIVE', 'CREATED', ?)`,
-		input.OrganizationID, input.ProjectCode, input.Name, input.Description,
-		input.OwnerUserID, input.CreatedBy)
+		INSERT INTO projects (project_code, name, description, owner_user_id, status, setup_status, created_by)
+		VALUES (?, ?, ?, ?, 'ACTIVE', 'ACTIVE', ?)`,
+		input.ProjectCode, input.Name, input.Description, input.OwnerUserID, input.CreatedBy)
 	if err != nil {
 		return 0, err
 	}
@@ -225,35 +226,11 @@ func (r *Repository) CreateProject(ctx context.Context, input CreateProjectInput
 		return 0, err
 	}
 
-	for _, step := range domain.ProjectSetupSteps {
-		completed := step.StepCode == domain.ProjectStepCreateProject
-		var completedBy any
-		var note any
-		if completed {
-			completedBy = input.CreatedBy
-			note = "项目基础信息已填写"
-		}
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO project_setup_steps (project_id, step_code, completed, wps_related, completed_by, note)
-			VALUES (?, ?, ?, ?, ?, ?)`,
-			insertedID, step.StepCode, boolToTinyInt(completed), boolToTinyInt(step.WPSRelated), completedBy, note)
-		if err != nil {
-			return 0, err
-		}
-	}
-
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 
 	return uint64(insertedID), nil
-}
-
-func boolToTinyInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
 }
 
 // GetProjectMemberRole returns the role_code for a user in a project, or empty if not a member.
@@ -338,10 +315,6 @@ func (r *Repository) AddProjectMember(ctx context.Context, input AddProjectMembe
 		SELECT COALESCE(NULLIF(nick_name, ''), name) FROM users WHERE id = ?`, input.UserID).
 		Scan(&userName)
 	if err != nil {
-		return ProjectMember{}, err
-	}
-
-	if err := maybeCompleteAddMembersStep(ctx, tx, input.ProjectID, input.InvitedBy); err != nil {
 		return ProjectMember{}, err
 	}
 
@@ -454,42 +427,12 @@ func (r *Repository) RemoveProjectMember(ctx context.Context, projectID, memberI
 	return tx.Commit()
 }
 
-func maybeCompleteAddMembersStep(ctx context.Context, tx *sql.Tx, projectID, operatorID uint64) error {
-	var memberCount int
-	err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM project_members WHERE project_id = ?`, projectID).
-		Scan(&memberCount)
-	if err != nil {
-		return err
-	}
-	if memberCount < 2 {
-		return nil
-	}
-
-	_, err = tx.ExecContext(ctx, `
-		UPDATE project_setup_steps
-		SET completed = 1, completed_at = CURRENT_TIMESTAMP(3), completed_by = ?,
-		    note = '已添加项目成员'
-		WHERE project_id = ? AND step_code = ? AND completed = 0`,
-		operatorID, projectID, domain.ProjectStepAddMembers)
-	if err != nil {
-		return err
-	}
-
-	_, err = tx.ExecContext(ctx, `
-		UPDATE projects SET setup_status = 'MEMBERS_CONFIGURED'
-		WHERE id = ? AND setup_status = 'CREATED'`, projectID)
-	return err
-}
-
 // UpdateProjectSetupInput holds optional project setup fields.
 type UpdateProjectSetupInput struct {
-	Name             *string
-	Description      *string
-	GitRepoURL       *string
-	GitDefaultBranch *string
-	WPSGroupID       *string
-	WPSGroupName     *string
+	Name         *string
+	Description  *string
+	WPSGroupID   *string
+	WPSGroupName *string
 }
 
 // UpdateProjectSetup updates project basic info and optional repository/group fields.
@@ -510,22 +453,6 @@ func (r *Repository) UpdateProjectSetup(ctx context.Context, projectID uint64, i
 		_, err := r.db.ExecContext(ctx, `
 			UPDATE projects SET description = ? WHERE id = ? AND status = 'ACTIVE'`,
 			nullIfEmptyString(*input.Description), projectID)
-		if err != nil {
-			return ProjectDetail{}, err
-		}
-	}
-	if input.GitRepoURL != nil {
-		_, err := r.db.ExecContext(ctx, `
-			UPDATE projects SET git_repo_url = ? WHERE id = ? AND status = 'ACTIVE'`,
-			nullIfEmptyString(*input.GitRepoURL), projectID)
-		if err != nil {
-			return ProjectDetail{}, err
-		}
-	}
-	if input.GitDefaultBranch != nil {
-		_, err := r.db.ExecContext(ctx, `
-			UPDATE projects SET git_default_branch = ? WHERE id = ? AND status = 'ACTIVE'`,
-			nullIfEmptyString(*input.GitDefaultBranch), projectID)
 		if err != nil {
 			return ProjectDetail{}, err
 		}

@@ -101,23 +101,11 @@ function DevAssignHistory({
   if (!submission) {
     return <p className="tsw-muted">该节点尚未提交阶段材料。</p>;
   }
-  const reviewLabel = submission.review_result === 'APPROVED'
-    ? '通过'
-    : submission.review_result === 'REJECTED'
-      ? '驳回'
-      : submission.review_result;
   return (
     <dl className="tsw-reqHistoryFields">
-      <HistoryField label="评审结论" value={reviewLabel} />
-      <HistoryField label="评审说明" value={submission.review_comment} />
-      <HistoryField label="评审人" value={memberName(members, submission.reviewer_user_id)} />
-      {submission.review_result === 'APPROVED' ? (
-        <>
-          <HistoryField label="前端负责人" value={memberName(members, requirement.developer_user_id)} />
-          <HistoryField label="后端负责人" value={memberName(members, requirement.backend_developer_user_id)} />
-          <HistoryField label="测试负责人" value={memberName(members, requirement.tester_user_id)} />
-        </>
-      ) : null}
+      <HistoryField label="研发方案" value={submission.dev_design_doc} />
+      <HistoryField label="研发负责人" value={memberName(members, requirement.developer_user_id)} />
+      <HistoryField label="测试负责人" value={memberName(members, requirement.tester_user_id)} />
       <HistoryField label="提交人" value={submission.operator_name} />
       <HistoryField label="提交时间" value={formatTime(submission.submitted_at)} />
     </dl>
@@ -214,7 +202,7 @@ export function RequirementPhaseHistoryPanel({
   loading,
   error,
 }: Props) {
-  const productOwner = members.find((m) => m.user_id === requirement.product_owner_user_id);
+  const productOwner = members.find((m) => m.user_id === (requirement.created_by || requirement.product_owner_user_id));
   const ownerName = productOwner ? userDisplayName(productOwner.user_name) : '—';
   const submission = submissionForStep(timeline, step.id);
   const changes = statusChangesForStep(timeline, step.id);
@@ -237,7 +225,7 @@ export function RequirementPhaseHistoryPanel({
           {step.id === 'product-design' ? (
             <ProductDesignHistory submission={submission} ownerName={ownerName} />
           ) : null}
-          {step.id === 'dev-assign' ? (
+          {step.id === 'dev-design' ? (
             <DevAssignHistory submission={submission} requirement={requirement} members={members} />
           ) : null}
           {step.id === 'development' ? (

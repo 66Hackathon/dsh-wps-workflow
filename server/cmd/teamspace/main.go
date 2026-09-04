@@ -29,6 +29,9 @@ func main() {
 		log.Fatalf("mysql: %v", err)
 	}
 	defer repo.Close()
+	if err := repo.EnsureRequirementDirectionSchema(context.Background()); err != nil {
+		log.Fatalf("mysql schema migration: %v", err)
+	}
 
 	sessions := session.NewManagerWithStore(&session.RepoStore{
 		Repo: sessionstore.MySQL{Repo: repo},
@@ -41,7 +44,7 @@ func main() {
 		Repo:     repo,
 	})
 
-	router := handler.NewRouter(cfg, repo, authHandler, sessions)
+	router := handler.NewRouter(cfg, repo, authHandler, sessions, wpsClient)
 	server := &http.Server{
 		Addr:              cfg.Addr(),
 		Handler:           router,

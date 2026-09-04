@@ -1,0 +1,15 @@
+{
+  "name": "dsh-profile-teamspace-dev",
+  "private": true,
+  "dependencies": {
+    "@66hackathon/dsh-teamspace": "link:/data/code/document/dsh‑wps‑workflow/plugin-teamspace"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@66hackathon/dsh-teamspace"
+      ]
+    }
+  }
+}

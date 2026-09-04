@@ -1,0 +1,49 @@
+{
+  "name": "@66hackathon/dsh-teamspace",
+  "version": "0.1.0",
+  "description": "DSH Agent tools：按需查询 TeamSpace 项目/需求/Bug/工作台，作为对话上下文。",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "teamspace",
+    "wps",
+    "tools"
+  ],
+  "author": {
+    "name": "66Hackathon",
+    "url": "https://github.com/66Hackathon"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/66Hackathon/dsh-wps-workflow.git",
+    "directory": "plugin-teamspace"
+  },
+  "bugs": {
+    "url": "https://github.com/66Hackathon/dsh-wps-workflow/issues"
+  },
+  "homepage": "https://github.com/66Hackathon/dsh-wps-workflow#readme",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "src",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.19"
+  }
+}

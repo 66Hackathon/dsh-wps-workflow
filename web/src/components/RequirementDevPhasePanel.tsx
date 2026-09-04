@@ -31,7 +31,7 @@ interface Props {
   onLockedFeature: (label: string) => void;
 }
 
-/** Demo：研发操作接口未就绪时，自动填充当前研发线的完成材料。 */
+/** 提交当前研发方向完成；全部所选方向完成后自动进入测试。 */
 async function completeDevelopmentPhase(
   requirement: Requirement,
   options: {
@@ -116,21 +116,33 @@ function trackOwnerId(
 }
 
 function buildTracks(requirement: Requirement): DevTrackConfig[] {
-  return DEMO_TRACKS.map((track, index) => {
-    const completed = index === 0
-      ? requirement.frontend_development_completed
-      : requirement.backend_development_completed;
-    return {
-      key: index === 0 ? 'frontend' : 'backend',
-      ...track,
-      ...(completed ? {
-        progress: 100,
-        statusLabel: '已完成',
-        devSteps: track.devSteps.map((step) => ({ ...step, state: 'completed' as const })),
-        tasks: track.tasks.map((task) => ({ ...task, state: 'completed' as const })),
-      } : {}),
-    };
-  });
+  const directions = (requirement.dev_directions || 'FRONTEND')
+    .split(',')
+    .map((d) => d.trim().toUpperCase())
+    .filter(Boolean);
+  const needFrontend = directions.includes('FRONTEND') || directions.length === 0;
+  const needBackend = directions.includes('BACKEND');
+
+  return DEMO_TRACKS
+    .map((track, index) => {
+      const key: DevTrackKey = index === 0 ? 'frontend' : 'backend';
+      if (key === 'frontend' && !needFrontend) return null;
+      if (key === 'backend' && !needBackend) return null;
+      const completed = key === 'frontend'
+        ? Boolean(requirement.frontend_development_completed)
+        : Boolean(requirement.backend_development_completed);
+      return {
+        key,
+        ...track,
+        ...(completed ? {
+          progress: 100,
+          statusLabel: '已完成',
+          devSteps: track.devSteps.map((step) => ({ ...step, state: 'completed' as const })),
+          tasks: track.tasks.map((task) => ({ ...task, state: 'completed' as const })),
+        } : {}),
+      };
+    })
+    .filter((track): track is DevTrackConfig => track != null);
 }
 
 function DevPhaseSummaryBar() {
@@ -267,11 +279,11 @@ function DevTrackCard({
             if (canOperate) onSubmitComplete?.();
           }}
         >
-          {submitting ? '提交中…' : '提交开发完成'}
+          {submitting ? '提交中…' : '提交研发完成'}
         </button>
         <p className="tsw-muted tsw-reqDevTrackSubmitHint">
           {canOperate
-            ? 'Demo：操作接口未就绪，可直接提交完成以推进主流程。'
+            ? '可直接提交当前方向研发完成；全部方向完成后将进入测试。'
             : '该操作仅由对应研发负责人执行。'}
         </p>
         </>
@@ -480,6 +492,11 @@ function DevPhaseDeveloperAside({
   const peerCompleted = track.key === 'frontend'
     ? requirement.backend_development_completed
     : requirement.frontend_development_completed;
+  const directions = (requirement.dev_directions || 'FRONTEND')
+    .split(',')
+    .map((direction) => direction.trim().toUpperCase());
+  const needsFrontend = directions.includes('FRONTEND');
+  const needsBackend = directions.includes('BACKEND');
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -542,18 +559,22 @@ function DevPhaseDeveloperAside({
       <div className="tsw-card tsw-reqAsideCard">
         <h4 className="tsw-reqAsideTitle">进入测试条件</h4>
         <ul className="tsw-reqDevCriteriaList">
-          <li data-done={requirement.frontend_development_completed ? 'true' : 'false'}>
-            <span className="tsw-reqDevCriteriaIcon" aria-hidden="true">
-              {requirement.frontend_development_completed ? '✓' : '○'}
-            </span>
-            前端研发已提交完成
-          </li>
-          <li data-done={requirement.backend_development_completed ? 'true' : 'false'}>
-            <span className="tsw-reqDevCriteriaIcon" aria-hidden="true">
-              {requirement.backend_development_completed ? '✓' : '○'}
-            </span>
-            后端研发已提交完成
-          </li>
+          {needsFrontend ? (
+            <li data-done={requirement.frontend_development_completed ? 'true' : 'false'}>
+              <span className="tsw-reqDevCriteriaIcon" aria-hidden="true">
+                {requirement.frontend_development_completed ? '✓' : '○'}
+              </span>
+              前端研发已提交完成
+            </li>
+          ) : null}
+          {needsBackend ? (
+            <li data-done={requirement.backend_development_completed ? 'true' : 'false'}>
+              <span className="tsw-reqDevCriteriaIcon" aria-hidden="true">
+                {requirement.backend_development_completed ? '✓' : '○'}
+              </span>
+              后端研发已提交完成
+            </li>
+          ) : null}
         </ul>
       </div>
     </>
@@ -579,7 +600,11 @@ export function RequirementDevPhaseMain({
 }: Props) {
   const tracks = useMemo(
     () => buildTracks(requirement),
-    [requirement.frontend_development_completed, requirement.backend_development_completed],
+    [
+      requirement.dev_directions,
+      requirement.frontend_development_completed,
+      requirement.backend_development_completed,
+    ],
   );
   const viewContext = useMemo(
     () => resolveDevPhaseView(currentUserId, requirement, members, frontendUserId, backendUserId),
@@ -587,7 +612,22 @@ export function RequirementDevPhaseMain({
   );
 
   if (viewContext.role === 'developer' && viewContext.track) {
-    const track = tracks.find((t) => t.key === viewContext.track)!;
+    const track = tracks.find((t) => t.key === viewContext.track);
+    if (!track) {
+      return (
+        <DevPhaseOverviewMain
+          tracks={tracks}
+          members={members}
+          requirement={requirement}
+          frontendUserId={frontendUserId}
+          backendUserId={backendUserId}
+          currentUserId={currentUserId}
+          readOnly={false}
+          onRequirementUpdated={onRequirementUpdated}
+          onLockedFeature={onLockedFeature}
+        />
+      );
+    }
     const owner = memberByUserId(members, trackOwnerId(viewContext.track, frontendUserId, backendUserId));
     return <DevPhaseDeveloperMain track={track} owner={owner} onLockedFeature={onLockedFeature} />;
   }
@@ -600,7 +640,7 @@ export function RequirementDevPhaseMain({
       frontendUserId={frontendUserId}
       backendUserId={backendUserId}
       currentUserId={currentUserId}
-      readOnly
+      readOnly={viewContext.role !== 'developer'}
       onRequirementUpdated={onRequirementUpdated}
       onLockedFeature={onLockedFeature}
     />
@@ -615,11 +655,16 @@ export function RequirementDevPhaseAside(props: Props) {
   );
   const tracks = useMemo(
     () => buildTracks(requirement),
-    [requirement.frontend_development_completed, requirement.backend_development_completed],
+    [
+      requirement.dev_directions,
+      requirement.frontend_development_completed,
+      requirement.backend_development_completed,
+    ],
   );
 
   if (viewContext.role === 'developer' && viewContext.track) {
-    const track = tracks.find((t) => t.key === viewContext.track)!;
+    const track = tracks.find((t) => t.key === viewContext.track);
+    if (!track) return null;
     return (
       <DevPhaseDeveloperAside
         track={track}

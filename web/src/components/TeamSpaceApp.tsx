@@ -3,7 +3,6 @@ import { api, setStoredToken } from '../api/client';
 import type { Project, TeamspaceUser, TopNav } from '../types';
 import { TOP_NAV_LABELS } from '../types';
 import { loadRecentVisits, recordRecentVisit, type RecentProjectVisit } from '../projectDisplay';
-import { ConversationView } from './ConversationView';
 import { FeatureLockedDialog } from './FeatureLockedDialog';
 import { PersonalWorkspace } from './PersonalWorkspace';
 import { ProjectFlowView } from './ProjectFlowView';
@@ -17,7 +16,6 @@ import { SettingsPanel } from './SettingsPanel';
 
 const TOP_NAV: { key: TopNav; label: string; icon: string }[] = [
   { key: 'projects', label: '项目空间', icon: '▦' },
-  { key: 'conversations', label: '会话', icon: '💬' },
   { key: 'workspace', label: '工作区', icon: '◫' },
   { key: 'settings', label: '设置', icon: '⚙' },
 ];
@@ -241,10 +239,6 @@ export default function TeamSpaceApp() {
           onProjectCreated={() => void refreshProjects()}
         />
       );
-    }
-
-    if (topNav === 'conversations' && user) {
-      return <ConversationView projects={projects} />;
     }
 
     if (topNav === 'workspace' && user) {

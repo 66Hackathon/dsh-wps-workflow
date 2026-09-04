@@ -9,11 +9,10 @@ import (
 
 // AIRequest is the payload sent to DSH SDK (reserved).
 type AIRequest struct {
-	UserID         uint64  `json:"user_id"`
-	ProjectID      uint64  `json:"project_id"`
-	RequirementID  *uint64 `json:"requirement_id,omitempty"`
-	ConversationID uint64  `json:"conversation_id"`
-	Message        string  `json:"message"`
+	UserID        uint64  `json:"user_id"`
+	ProjectID     uint64  `json:"project_id"`
+	RequirementID *uint64 `json:"requirement_id,omitempty"`
+	Message       string  `json:"message"`
 }
 
 // AIResponse mirrors the expected DSH SDK response shape.

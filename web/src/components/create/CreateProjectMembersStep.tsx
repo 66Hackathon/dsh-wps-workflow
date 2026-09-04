@@ -9,6 +9,8 @@ import {
   userDisplayName,
 } from '../../memberRoles';
 import type { OrgUser, Project, ProjectMember } from '../../types';
+import { addWpsContactsToProject } from '../../wpsContacts';
+import { WpsContactsPickerDialog } from '../wps/WpsContactsPickerDialog';
 import { CreateStepFooter } from './CreateStepFooter';
 
 interface DraftMember {
@@ -66,6 +68,7 @@ export function CreateProjectMembersStep({
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showContactsPicker, setShowContactsPicker] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -206,9 +209,19 @@ export function CreateProjectMembersStep({
       <div className="tsw-createWizardMain">
         <div className="tsw-createForm tsw-createWizardCard">
           <h3 className="tsw-createWizardHeading">添加项目成员</h3>
-          <p className="tsw-muted tsw-createWizardSub">
-            从系统用户中选择成员加入项目。产品、研发、测试等职能角色在创建需求时指定，无需在此分配。
-          </p>
+          <div className="tsw-createWizardHeadingRow" style={{ marginTop: -4, marginBottom: 12 }}>
+            <p className="tsw-muted tsw-createWizardSub" style={{ margin: 0 }}>
+              从系统用户或 WPS 通讯录中选择成员加入项目。
+            </p>
+            <button
+              type="button"
+              className="tsw-btn tsw-btnPrimary tsw-btnSolid"
+              onClick={() => setShowContactsPicker(true)}
+              disabled={loading || submitting}
+            >
+              从通讯录选择
+            </button>
+          </div>
 
           <div className="tsw-memberSearchWrap" ref={searchRef}>
             <div className="tsw-memberSearchBox">
@@ -356,10 +369,30 @@ export function CreateProjectMembersStep({
           <ul className="tsw-createAsideList">
             <li>创建者自动成为项目管理员</li>
             <li>其他成员默认为普通项目成员</li>
-            <li>产品、研发、测试负责人在创建需求时指定</li>
+            <li>需求创建者为产品负责人，创建时指定研发与测试负责人</li>
           </ul>
         </div>
       </aside>
+
+      {showContactsPicker ? (
+        <WpsContactsPickerDialog
+          multiple
+          onClose={() => setShowContactsPicker(false)}
+          onConfirm={async (contacts) => {
+            await addWpsContactsToProject(project.id, contacts);
+            const usersRes = await api.listOrgUsers();
+            setOrgUsers(usersRes.items ?? []);
+            const remote = await api.listProjectMembers(project.id);
+            setDraftMembers(
+              buildDraftFromMembers(
+                remote.items ?? [],
+                usersRes.items ?? [],
+                ownerUserId,
+              ),
+            );
+          }}
+        />
+      ) : null}
     </div>
   );
 }

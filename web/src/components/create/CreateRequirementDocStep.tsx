@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { api } from '../../api/client';
 import type { Project, Requirement } from '../../types';
+import type { WpsDocument } from '../../types/wps';
+import { wpsDocumentHref } from '../../types/wps';
 import {
   createEmptyRequirementDraft,
   PRIORITY_LABELS,
@@ -9,6 +11,7 @@ import {
   type RequirementDraft,
 } from '../../requirementCreate';
 import { REQUIREMENT_STATUS_LABELS } from '../../types';
+import { WpsDocumentPickerDialog } from '../wps/WpsDocumentPickerDialog';
 import { CreateStepFooter } from './CreateStepFooter';
 
 interface Props {
@@ -29,9 +32,18 @@ export function CreateRequirementDocStep({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<Requirement | null>(null);
+  const [linkedDoc, setLinkedDoc] = useState<WpsDocument | null>(null);
+  const [showDocPicker, setShowDocPicker] = useState(false);
 
   const typeLabel =
     REQUIREMENT_TYPE_OPTIONS.find((o) => o.value === draft.requirementType)?.label ?? draft.requirementType;
+
+  const buildDescription = () => {
+    const base = draft.description.trim();
+    if (!linkedDoc) return base;
+    const docLine = `[WPS文档] ${linkedDoc.name}${linkedDoc.link_url ? ` ${linkedDoc.link_url}` : ''}`;
+    return base ? `${base}\n\n${docLine}` : docLine;
+  };
 
   const handleCreate = async () => {
     setSubmitting(true);
@@ -40,11 +52,14 @@ export function CreateRequirementDocStep({
       const requirement = await api.createRequirement(project.id, {
         requirement_code: suggestRequirementCode(project.project_code, existingRequirementCount),
         title: draft.title.trim(),
-        description: draft.description.trim(),
+        description: buildDescription(),
         priority: draft.priority,
         requirement_type: draft.requirementType,
         acceptance_criteria: draft.acceptanceCriteria.trim(),
-        product_owner_user_id: draft.productOwnerUserId,
+        dev_directions: draft.devDirection,
+        developer_user_id: draft.devDirection === 'FRONTEND' ? draft.developerUserId : undefined,
+        backend_developer_user_id: draft.devDirection === 'BACKEND' ? draft.developerUserId : undefined,
+        tester_user_id: draft.testerUserId,
         planned_start_at: draft.plannedStart || undefined,
         planned_end_at: draft.plannedEnd || undefined,
       });
@@ -74,10 +89,13 @@ export function CreateRequirementDocStep({
             <span className="tsw-muted">优先级</span>
             <span>{PRIORITY_LABELS[created.priority] ?? created.priority}</span>
           </div>
+          {linkedDoc ? (
+            <div className="tsw-createSummaryKv">
+              <span className="tsw-muted">关联文档</span>
+              <span>{linkedDoc.name}</span>
+            </div>
+          ) : null}
         </div>
-        <p className="tsw-fieldHint" style={{ marginTop: 16 }}>
-          WPS 在线文档关联 Demo 暂未开放，可在「文档」Tab 后续完善。
-        </p>
       </div>
     );
   }
@@ -88,7 +106,7 @@ export function CreateRequirementDocStep({
       <div className="tsw-createForm tsw-createWizardCard tsw-createFormFill">
         <h3 className="tsw-createWizardHeading">需求文档</h3>
         <p className="tsw-createWizardSub tsw-muted">
-          可关联 WPS 在线文档作为需求规格说明。Demo 阶段可先跳过，创建后再补充。
+          可关联 WPS 在线文档作为需求规格说明，也可跳过此步骤稍后补充。
         </p>
 
         <div className="tsw-docUploadGrid">
@@ -96,12 +114,35 @@ export function CreateRequirementDocStep({
             <span className="tsw-docUploadIcon" aria-hidden="true">☁</span>
             <span>上传本地文档</span>
           </button>
-          <button type="button" className="tsw-docUploadTile" disabled>
+          <button
+            type="button"
+            className="tsw-docUploadTile"
+            onClick={() => setShowDocPicker(true)}
+          >
             <span className="tsw-docUploadIcon tsw-docUploadIconWps" aria-hidden="true">📄</span>
             <span>关联 WPS 在线文档</span>
           </button>
         </div>
-        <p className="tsw-fieldHint">WPS 文档创建与关联能力 Demo 暂未开放。</p>
+
+        {linkedDoc ? (
+          <div className="tsw-wpsDocCard">
+            <span className="tsw-docUploadIcon tsw-docUploadIconWps" aria-hidden="true">📄</span>
+            <div className="tsw-wpsDocRowText">
+              <strong>{linkedDoc.name}</strong>
+              <span className="tsw-muted">{linkedDoc.type || '智能文档'}</span>
+            </div>
+            {wpsDocumentHref(linkedDoc) ? (
+              <a className="tsw-linkBtn" href={wpsDocumentHref(linkedDoc)} target="_blank" rel="noreferrer">
+                预览
+              </a>
+            ) : null}
+            <button type="button" className="tsw-linkBtn" onClick={() => setLinkedDoc(null)}>
+              移除
+            </button>
+          </div>
+        ) : (
+          <p className="tsw-fieldHint">尚未关联 WPS 文档，可点击上方按钮从云文档选择。</p>
+        )}
 
         <div className="tsw-createSummary" style={{ marginTop: 8 }}>
           <h4>创建摘要</h4>
@@ -117,10 +158,28 @@ export function CreateRequirementDocStep({
             <span className="tsw-muted">优先级</span>
             <span>{PRIORITY_LABELS[draft.priority] ?? draft.priority}</span>
           </div>
+          <div className="tsw-createSummaryKv">
+            <span className="tsw-muted">研发方向</span>
+            <span>{draft.devDirection === 'BACKEND' ? '后端' : '前端'}</span>
+          </div>
+          <div className="tsw-createSummaryKv">
+            <span className="tsw-muted">研发负责人</span>
+            <span>{draft.developerUserId ? '已指定' : '未指定'}</span>
+          </div>
+          <div className="tsw-createSummaryKv">
+            <span className="tsw-muted">测试负责人</span>
+            <span>{draft.testerUserId ? '已指定' : '未指定'}</span>
+          </div>
           {(draft.plannedStart || draft.plannedEnd) ? (
             <div className="tsw-createSummaryKv">
               <span className="tsw-muted">计划周期</span>
               <span>{draft.plannedStart || '—'} ~ {draft.plannedEnd || '—'}</span>
+            </div>
+          ) : null}
+          {linkedDoc ? (
+            <div className="tsw-createSummaryKv">
+              <span className="tsw-muted">WPS 文档</span>
+              <span>{linkedDoc.name}</span>
             </div>
           ) : null}
         </div>
@@ -145,12 +204,21 @@ export function CreateRequirementDocStep({
             <strong>即将完成</strong>
           </div>
           <ul className="tsw-createAsideList">
-            <li>创建后进入产品编辑阶段</li>
-            <li>文档可稍后通过 WPS 关联</li>
-            <li>AI 生成文档能力 Demo 暂未开放</li>
+            <li>创建后进入产品设计阶段</li>
+            <li>支持关联 WPS 智能文档</li>
+            <li>文档信息会写入需求描述</li>
           </ul>
         </div>
       </aside>
+
+      {showDocPicker ? (
+        <WpsDocumentPickerDialog
+          onClose={() => setShowDocPicker(false)}
+          onConfirm={async (doc) => {
+            setLinkedDoc(doc);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

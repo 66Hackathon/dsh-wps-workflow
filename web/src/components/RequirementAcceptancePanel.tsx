@@ -5,7 +5,7 @@ import { formatRelativeFromISO } from '../projectDisplay';
 import { isRequirementProductOwner, PRODUCT_OWNER_ONLY_HINT } from '../requirementPermissions';
 import type { ProjectMember, Requirement } from '../types';
 
-/** 主需求处于 DONE（待验收）：产品负责人验收通过/失败 */
+/** 主需求验收 → 回归；Bug 子需求验收通过 → 关闭 */
 export function RequirementAcceptancePanel({
   requirement,
   members,
@@ -17,6 +17,7 @@ export function RequirementAcceptancePanel({
   currentUserId?: number;
   onRequirementUpdated: (requirement: Requirement) => void;
 }) {
+  const isBugItem = requirement.item_type === 'BUG' || requirement.development_scope === 'BUG_FIX';
   const [conclusion, setConclusion] = useState<'PASS' | 'FAIL'>('PASS');
   const [comment, setComment] = useState('');
   const [releaseNote, setReleaseNote] = useState('');
@@ -24,11 +25,12 @@ export function RequirementAcceptancePanel({
   const [error, setError] = useState<string | null>(null);
 
   const canAccept = isRequirementProductOwner(requirement, currentUserId);
-  const productOwner = members.find((member) => member.user_id === requirement.product_owner_user_id);
+  const ownerId = requirement.created_by || requirement.product_owner_user_id;
+  const productOwner = members.find((member) => member.user_id === ownerId);
   const ownerName = productOwner
     ? userDisplayName(productOwner.user_name)
-    : requirement.product_owner_user_id
-      ? `用户 ${requirement.product_owner_user_id}`
+    : ownerId
+      ? `用户 ${ownerId}`
       : '未指定';
 
   const handleSubmit = async () => {
@@ -38,26 +40,35 @@ export function RequirementAcceptancePanel({
     }
     const note = comment.trim();
     if (!note) {
-      setError('请填写验收说明');
+      setError(conclusion === 'PASS' ? '请填写验收说明' : '请填写失败原因');
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
       if (conclusion === 'PASS') {
-        const release = releaseNote.trim() || note;
-        const updated = await api.transitionRequirement(requirement.id, 'ARCHIVED', {
-          review_result: 'APPROVED',
-          review_comment: note,
-          release_note: release,
-          closed_by_user_id: currentUserId,
-          remark: '产品验收通过，需求已归档',
-        });
-        onRequirementUpdated(updated);
+        if (isBugItem) {
+          const updated = await api.transitionRequirement(requirement.id, 'CLOSED', {
+            accept_result: 'PASS',
+            acceptance_note: note,
+            release_note: releaseNote.trim() || note,
+            remark: 'Bug 验收通过，已关闭',
+          });
+          onRequirementUpdated(updated);
+        } else {
+          const updated = await api.transitionRequirement(requirement.id, 'REGRESSION', {
+            accept_result: 'PASS',
+            acceptance_note: note,
+            release_note: releaseNote.trim() || note,
+            remark: '产品验收通过，进入回归测试',
+          });
+          onRequirementUpdated(updated);
+        }
       } else {
         const updated = await api.transitionRequirement(requirement.id, 'DEVELOPMENT', {
-          review_result: 'REJECTED',
-          review_comment: note,
+          accept_result: 'FAIL',
+          acceptance_note: note,
+          return_reason: note,
           remark: '产品验收失败，退回研发',
         });
         onRequirementUpdated(updated);
@@ -68,6 +79,9 @@ export function RequirementAcceptancePanel({
       setSubmitting(false);
     }
   };
+
+  const passHint = isBugItem ? '关闭该 Bug 需求' : '进入回归测试';
+  const passButton = isBugItem ? '确认验收通过并关闭' : '确认验收通过并进入回归';
 
   if (!canAccept) {
     return (
@@ -118,7 +132,7 @@ export function RequirementAcceptancePanel({
         </div>
 
         <p className="tsw-muted tsw-reqAcceptReadonlyHint">
-          ⓘ 验收结果提交后将在此同步展示
+          ⓘ 验收通过后{passHint}；失败将退回研发。
         </p>
       </section>
     );
@@ -131,7 +145,7 @@ export function RequirementAcceptancePanel({
         <span className="tsw-tag">待验收</span>
       </div>
       <p className="tsw-muted" style={{ marginBottom: 16 }}>
-        测试已通过，请产品负责人确认是否达到验收标准。通过后归档完成；失败将退回研发阶段。
+        测试已通过，请产品负责人确认是否达到验收标准。通过后{passHint}；失败将退回研发。
       </p>
 
       <div className="tsw-reqAcceptChoices" role="radiogroup" aria-label="验收结论">
@@ -140,18 +154,16 @@ export function RequirementAcceptancePanel({
             type="radio"
             name="acceptance-conclusion"
             checked={conclusion === 'PASS'}
-            disabled={!canAccept}
             onChange={() => setConclusion('PASS')}
           />
           <span>验收通过</span>
-          <small>需求归档为已完成</small>
+          <small>{passHint}</small>
         </label>
         <label className="tsw-reqAcceptChoice" data-active={conclusion === 'FAIL' ? 'true' : 'false'}>
           <input
             type="radio"
             name="acceptance-conclusion"
             checked={conclusion === 'FAIL'}
-            disabled={!canAccept}
             onChange={() => setConclusion('FAIL')}
           />
           <span>验收失败</span>
@@ -164,7 +176,6 @@ export function RequirementAcceptancePanel({
         <textarea
           rows={4}
           value={comment}
-          disabled={!canAccept}
           placeholder={conclusion === 'PASS' ? '说明验收依据、遗留项等' : '说明未通过原因与期望修改点'}
           onChange={(e) => setComment(e.target.value)}
         />
@@ -176,7 +187,6 @@ export function RequirementAcceptancePanel({
           <textarea
             rows={3}
             value={releaseNote}
-            disabled={!canAccept}
             placeholder="版本发布说明 / 上线备注"
             onChange={(e) => setReleaseNote(e.target.value)}
           />
@@ -186,24 +196,18 @@ export function RequirementAcceptancePanel({
       {error ? <p className="tsw-error">{error}</p> : null}
 
       <div className="tsw-reqActionRow" style={{ marginTop: 16 }}>
-        {canAccept ? (
-          <button
-            type="button"
-            className="tsw-btn tsw-btnPrimary tsw-btnSolid"
-            disabled={submitting}
-            onClick={() => void handleSubmit()}
-          >
-            {submitting
-              ? '提交中…'
-              : conclusion === 'PASS'
-                ? '确认验收通过并归档'
-                : '确认验收失败并退回研发'}
-          </button>
-        ) : (
-          <span className="tsw-tag tsw-tagMuted" title={PRODUCT_OWNER_ONLY_HINT}>
-            仅产品负责人可验收
-          </span>
-        )}
+        <button
+          type="button"
+          className="tsw-btn tsw-btnPrimary tsw-btnSolid"
+          disabled={submitting}
+          onClick={() => void handleSubmit()}
+        >
+          {submitting
+            ? '提交中…'
+            : conclusion === 'PASS'
+              ? passButton
+              : '确认验收失败并退回研发'}
+        </button>
       </div>
     </section>
   );

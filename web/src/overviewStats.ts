@@ -44,8 +44,9 @@ export function overviewStatusLabel(status: string): string {
       return 'Bug修复中';
     case 'DONE':
       return '已完成';
+    case 'CLOSED':
     case 'ARCHIVED':
-      return '已归档';
+      return '已关闭';
     default:
       return status;
   }
@@ -64,6 +65,7 @@ export function overviewStatusTone(status: string): OverviewStatCard['tone'] {
       return 'orange';
     case 'DONE':
       return 'green';
+    case 'CLOSED':
     case 'ARCHIVED':
       return 'gray';
     default:
@@ -108,7 +110,7 @@ export function buildOverviewStats(requirements: Requirement[], bugs: Bug[]): Ov
       value: countByStatus(requirements, ['DONE']),
       tone: 'orange',
     },
-    { key: 'done', label: '已完成', value: countByStatus(requirements, ['ARCHIVED']), tone: 'green' },
+    { key: 'done', label: '已完成', value: countByStatus(requirements, ['CLOSED', 'ARCHIVED']), tone: 'green' },
   ];
 }
 
@@ -133,7 +135,7 @@ export function buildPhaseSegments(requirements: Requirement[]): PhaseSegment[] 
       color: PHASE_COLORS.test,
     },
     { key: 'pending', label: '待验收', count: countByStatus(requirements, ['DONE']), color: PHASE_COLORS.pending },
-    { key: 'done', label: '完成', count: countByStatus(requirements, ['ARCHIVED']), color: PHASE_COLORS.done },
+    { key: 'done', label: '完成', count: countByStatus(requirements, ['CLOSED', 'ARCHIVED']), color: PHASE_COLORS.done },
     {
       key: 'archived',
       label: '归档',
@@ -152,11 +154,11 @@ export function resolveRequirementOwner(
   const pick = (id?: number) => (id ? memberMap.get(id) : undefined);
   switch (req.current_status) {
     case 'DEVELOPMENT':
-      return pick(req.developer_user_id) ?? pick(req.product_owner_user_id) ?? '—';
+      return pick(req.developer_user_id) ?? pick(req.created_by) ?? pick(req.product_owner_user_id) ?? '—';
     case 'TESTING':
       return pick(req.tester_user_id) ?? pick(req.developer_user_id) ?? '—';
     default:
-      return pick(req.product_owner_user_id) ?? pick(req.developer_user_id) ?? '—';
+      return pick(req.created_by) ?? pick(req.product_owner_user_id) ?? pick(req.developer_user_id) ?? '—';
   }
 }
 
@@ -168,7 +170,7 @@ export function buildActivityFeed(
   const items: ActivityItem[] = [];
 
   for (const req of requirements.slice(0, 4)) {
-    const creator = memberMap.get(req.product_owner_user_id ?? 0) ?? '成员';
+    const creator = memberMap.get(req.created_by ?? req.product_owner_user_id ?? 0) ?? '成员';
     if (req.current_status === 'DEVELOPMENT') {
       const dev = memberMap.get(req.developer_user_id ?? 0) ?? creator;
       items.push({

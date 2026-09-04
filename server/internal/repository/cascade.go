@@ -38,23 +38,6 @@ func deleteByIDs(ctx context.Context, tx *sql.Tx, table, column string, ids []ui
 	return err
 }
 
-func deleteConversationsByIDs(ctx context.Context, tx *sql.Tx, conversationIDs []uint64) error {
-	if len(conversationIDs) == 0 {
-		return nil
-	}
-	messageIDs, err := queryIDs(ctx, tx, `SELECT id FROM conversation_message WHERE conversation_id IN (`+placeholders(len(conversationIDs))+`)`, uint64Args(conversationIDs)...)
-	if err != nil {
-		return err
-	}
-	if err := deleteByIDs(ctx, tx, "message_attachment", "message_id", messageIDs); err != nil {
-		return err
-	}
-	if err := deleteByIDs(ctx, tx, "conversation_message", "conversation_id", conversationIDs); err != nil {
-		return err
-	}
-	return deleteByIDs(ctx, tx, "conversation", "id", conversationIDs)
-}
-
 func deleteRequirementsByIDs(ctx context.Context, tx *sql.Tx, requirementIDs []uint64) error {
 	if len(requirementIDs) == 0 {
 		return nil
@@ -62,7 +45,7 @@ func deleteRequirementsByIDs(ctx context.Context, tx *sql.Tx, requirementIDs []u
 	args := uint64Args(requirementIDs)
 	in := placeholders(len(requirementIDs))
 
-	childIDs, err := queryIDs(ctx, tx, `SELECT id FROM requirements WHERE parent_requirement_id IN (`+in+`)`, args...)
+	childIDs, err := queryIDs(ctx, tx, `SELECT id FROM requirements WHERE parent_item_id IN (`+in+`)`, args...)
 	if err != nil {
 		return err
 	}
@@ -70,31 +53,6 @@ func deleteRequirementsByIDs(ctx context.Context, tx *sql.Tx, requirementIDs []u
 		if err := deleteRequirementsByIDs(ctx, tx, childIDs); err != nil {
 			return err
 		}
-	}
-
-	conversationIDs, err := queryIDs(ctx, tx, `SELECT id FROM conversation WHERE requirement_id IN (`+in+`)`, args...)
-	if err != nil {
-		return err
-	}
-	if err := deleteConversationsByIDs(ctx, tx, conversationIDs); err != nil {
-		return err
-	}
-
-	bugIDs, err := queryIDs(ctx, tx, `SELECT id FROM bugs WHERE requirement_id IN (`+in+`) OR fix_requirement_id IN (`+in+`)`, append(args, args...)...)
-	if err != nil {
-		return err
-	}
-	if len(bugIDs) > 0 {
-		bugConversations, err := queryIDs(ctx, tx, `SELECT id FROM conversation WHERE bug_id IN (`+placeholders(len(bugIDs))+`)`, uint64Args(bugIDs)...)
-		if err != nil {
-			return err
-		}
-		if err := deleteConversationsByIDs(ctx, tx, bugConversations); err != nil {
-			return err
-		}
-	}
-	if err := deleteByIDs(ctx, tx, "bugs", "id", bugIDs); err != nil {
-		return err
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM status_change_log WHERE resource_type = 'REQUIREMENT' AND resource_id IN (`+in+`)`, args...); err != nil {
@@ -115,21 +73,10 @@ func deleteProjectGraph(ctx context.Context, tx *sql.Tx, projectID uint64) error
 		return err
 	}
 
-	conversationIDs, err := queryIDs(ctx, tx, `SELECT id FROM conversation WHERE project_id = ?`, projectID)
-	if err != nil {
-		return err
-	}
-	if err := deleteConversationsByIDs(ctx, tx, conversationIDs); err != nil {
-		return err
-	}
-
-	if _, err := tx.ExecContext(ctx, `DELETE FROM bugs WHERE project_id = ?`, projectID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM project_repositories WHERE project_id = ?`, projectID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM project_members WHERE project_id = ?`, projectID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM project_setup_steps WHERE project_id = ?`, projectID); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, projectID)
@@ -139,18 +86,10 @@ func deleteProjectGraph(ctx context.Context, tx *sql.Tx, projectID uint64) error
 func clearMemberAssignments(ctx context.Context, tx *sql.Tx, projectID, userID uint64) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE requirements
-		SET product_owner_user_id = IF(product_owner_user_id = ?, NULL, product_owner_user_id),
-		    developer_user_id = IF(developer_user_id = ?, NULL, developer_user_id),
-		    backend_developer_user_id = IF(backend_developer_user_id = ?, NULL, backend_developer_user_id),
+		SET developer_user_id = IF(developer_user_id = ?, NULL, developer_user_id),
 		    tester_user_id = IF(tester_user_id = ?, NULL, tester_user_id)
 		WHERE project_id = ?`,
-		userID, userID, userID, userID, projectID)
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `
-		UPDATE bugs SET assignee_user_id = NULL
-		WHERE project_id = ? AND assignee_user_id = ?`, projectID, userID)
+		userID, userID, projectID)
 	return err
 }
 

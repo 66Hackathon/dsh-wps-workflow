@@ -8,27 +8,26 @@ import (
 
 // RequirementStageSubmission is a persisted stage exit record.
 type RequirementStageSubmission struct {
-	ID                   uint64     `json:"id"`
-	RequirementID        uint64     `json:"requirement_id"`
-	StageCode            string     `json:"stage_code"`
-	SpecBody             *string    `json:"spec_body,omitempty"`
-	AcceptanceCriteria   *string    `json:"acceptance_criteria,omitempty"`
-	ProductOwnerUserID   *uint64    `json:"product_owner_user_id,omitempty"`
-	ReviewResult         *string    `json:"review_result,omitempty"`
-	ReviewComment        *string    `json:"review_comment,omitempty"`
-	ReviewerUserID       *uint64    `json:"reviewer_user_id,omitempty"`
-	DevSummary           *string    `json:"dev_summary,omitempty"`
-	ImplementationNotes  *string    `json:"implementation_notes,omitempty"`
-	DeveloperUserID      *uint64    `json:"developer_user_id,omitempty"`
-	TestSummary          *string    `json:"test_summary,omitempty"`
-	TestCasesCovered     *string    `json:"test_cases_covered,omitempty"`
-	TestResult           *string    `json:"test_result,omitempty"`
-	TesterUserID         *uint64    `json:"tester_user_id,omitempty"`
-	ReleaseNote          *string    `json:"release_note,omitempty"`
-	ClosedByUserID       *uint64    `json:"closed_by_user_id,omitempty"`
-	OperatorUserID       uint64     `json:"operator_user_id"`
-	OperatorName         string     `json:"operator_name,omitempty"`
-	SubmittedAt          time.Time  `json:"submitted_at"`
+	ID                uint64    `json:"id"`
+	RequirementID     uint64    `json:"requirement_id"`
+	StageCode         string    `json:"stage_code"`
+	SpecBody          *string   `json:"spec_body,omitempty"`
+	AcceptanceCriteria *string  `json:"acceptance_criteria,omitempty"`
+	DevDesignDoc      *string   `json:"dev_design_doc,omitempty"`
+	DevSummary        *string   `json:"dev_summary,omitempty"`
+	ImplementationNotes *string `json:"implementation_notes,omitempty"`
+	DeveloperUserID   *uint64   `json:"developer_user_id,omitempty"`
+	ReturnReason      *string   `json:"return_reason,omitempty"`
+	TestResult        *string   `json:"test_result,omitempty"`
+	TestSummary       *string   `json:"test_summary,omitempty"`
+	TestCasesCovered  *string   `json:"test_cases_covered,omitempty"`
+	TesterUserID      *uint64   `json:"tester_user_id,omitempty"`
+	AcceptanceNote    *string   `json:"acceptance_note,omitempty"`
+	RegressionResult  *string   `json:"regression_result,omitempty"`
+	RegressionSummary *string   `json:"regression_summary,omitempty"`
+	OperatorUserID    uint64    `json:"operator_user_id"`
+	OperatorName      string    `json:"operator_name,omitempty"`
+	SubmittedAt       time.Time `json:"submitted_at"`
 }
 
 // StatusChangeLogEntry is one requirement status transition audit record.
@@ -68,11 +67,13 @@ func (r *Repository) listStageSubmissions(ctx context.Context, requirementID uin
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			id, requirement_id, stage_code,
-			spec_body, acceptance_criteria, product_owner_user_id,
-			review_result, review_comment, reviewer_user_id,
+			spec_body, acceptance_criteria,
+			dev_design_doc,
 			dev_summary, implementation_notes, developer_user_id,
-			test_summary, test_cases_covered, test_result, tester_user_id,
-			release_note, closed_by_user_id,
+			return_reason,
+			test_result, test_summary, test_cases_covered, tester_user_id,
+			acceptance_note,
+			regression_result, regression_summary,
 			operator_user_id, submitted_at
 		FROM requirement_stage_submissions
 		WHERE requirement_id = ?
@@ -153,17 +154,21 @@ func (r *Repository) listRequirementStatusChanges(ctx context.Context, requireme
 
 func scanStageSubmissionRow(row scanner) (RequirementStageSubmission, error) {
 	var item RequirementStageSubmission
-	var specBody, acceptance, reviewResult, reviewComment sql.NullString
-	var devSummary, implNotes, testSummary, testCases, testResult, releaseNote sql.NullString
-	var po, reviewer, developer, tester, closedBy sql.NullInt64
+	var specBody, acceptance, devDesignDoc sql.NullString
+	var devSummary, implNotes, returnReason sql.NullString
+	var testResult, testSummary, testCases sql.NullString
+	var acceptanceNote, regressionResult, regressionSummary sql.NullString
+	var developer, tester sql.NullInt64
 
 	err := row.Scan(
 		&item.ID, &item.RequirementID, &item.StageCode,
-		&specBody, &acceptance, &po,
-		&reviewResult, &reviewComment, &reviewer,
+		&specBody, &acceptance,
+		&devDesignDoc,
 		&devSummary, &implNotes, &developer,
-		&testSummary, &testCases, &testResult, &tester,
-		&releaseNote, &closedBy,
+		&returnReason,
+		&testResult, &testSummary, &testCases, &tester,
+		&acceptanceNote,
+		&regressionResult, &regressionSummary,
 		&item.OperatorUserID, &item.SubmittedAt,
 	)
 	if err != nil {
@@ -171,19 +176,18 @@ func scanStageSubmissionRow(row scanner) (RequirementStageSubmission, error) {
 	}
 	assignNullString(&item.SpecBody, specBody)
 	assignNullString(&item.AcceptanceCriteria, acceptance)
-	assignNullString(&item.ReviewResult, reviewResult)
-	assignNullString(&item.ReviewComment, reviewComment)
+	assignNullString(&item.DevDesignDoc, devDesignDoc)
 	assignNullString(&item.DevSummary, devSummary)
 	assignNullString(&item.ImplementationNotes, implNotes)
+	assignNullString(&item.ReturnReason, returnReason)
+	assignNullString(&item.TestResult, testResult)
 	assignNullString(&item.TestSummary, testSummary)
 	assignNullString(&item.TestCasesCovered, testCases)
-	assignNullString(&item.TestResult, testResult)
-	assignNullString(&item.ReleaseNote, releaseNote)
-	assignNullUint64(&item.ProductOwnerUserID, po)
-	assignNullUint64(&item.ReviewerUserID, reviewer)
+	assignNullString(&item.AcceptanceNote, acceptanceNote)
+	assignNullString(&item.RegressionResult, regressionResult)
+	assignNullString(&item.RegressionSummary, regressionSummary)
 	assignNullUint64(&item.DeveloperUserID, developer)
 	assignNullUint64(&item.TesterUserID, tester)
-	assignNullUint64(&item.ClosedByUserID, closedBy)
 	return item, nil
 }
 

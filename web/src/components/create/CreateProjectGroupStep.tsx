@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../api/client';
 import type { Project } from '../../types';
+import { WpsChatPickerDialog } from '../wps/WpsGroupChatPanel';
 import { CreateStepFooter } from './CreateStepFooter';
 
 interface Props {
@@ -18,21 +19,24 @@ export function CreateProjectGroupStep({
   onPrev,
   onFinish,
 }: Props) {
-  const [groupName, setGroupName] = useState(project.wps_group_name ?? '');
+  const [groupName, setGroupName] = useState(project.wps_group_name ?? `${project.name} 项目群`);
+  const [groupId, setGroupId] = useState(project.wps_group_id ?? '');
   const [submitting, setSubmitting] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showChatPicker, setShowChatPicker] = useState(false);
 
-  const finish = async (skip = false) => {
+  const saveGroup = async (nextId: string, nextName: string, finishAfter = false) => {
     setSubmitting(true);
     setError(null);
     try {
-      if (!skip && groupName.trim()) {
-        await api.updateProjectSetup(project.id, {
-          wps_group_name: groupName.trim(),
-          wps_group_id: `demo-group-${project.id}`,
-        });
-      }
-      onFinish();
+      await api.updateProjectSetup(project.id, {
+        wps_group_name: nextName,
+        wps_group_id: nextId,
+      });
+      setGroupId(nextId);
+      setGroupName(nextName);
+      if (finishAfter) onFinish();
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败');
     } finally {
@@ -40,7 +44,37 @@ export function CreateProjectGroupStep({
     }
   };
 
-  const groupLabel = groupName.trim() || '未关联';
+  const handleCreateGroup = async (finishAfter = false) => {
+    const name = groupName.trim() || `${project.name} 项目群`;
+    setCreating(true);
+    setError(null);
+    try {
+      const result = await api.createProjectWpsGroup(project.id, name);
+      setGroupId(result.chat.id);
+      setGroupName(result.chat.name || name);
+      if (finishAfter) onFinish();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '创建群聊失败');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const finish = async (skip = false) => {
+    if (skip) {
+      onFinish();
+      return;
+    }
+    if (groupId) {
+      await saveGroup(groupId, groupName.trim() || `${project.name} 项目群`, true);
+      return;
+    }
+    onFinish();
+  };
+
+  const groupLabel = groupId
+    ? `${groupName || '已关联群聊'} (${groupId})`
+    : groupName.trim() || '未关联';
 
   return (
     <div className="tsw-createWizardLayout">
@@ -48,10 +82,10 @@ export function CreateProjectGroupStep({
         <div className="tsw-createForm tsw-createWizardCard">
           <div className="tsw-createWizardHeadingRow">
             <h3 className="tsw-createWizardHeading">关联 WPS 项目群</h3>
-            <span className="tsw-badge tsw-badgeMuted">可选 · 暂未开放</span>
+            <span className="tsw-badge">WPS 集成</span>
           </div>
           <p className="tsw-muted tsw-createWizardSub">
-            项目群不是创建项目的必要条件，创建后可以随时添加或更换
+            项目群不是创建项目的必要条件，也可在此一键创建并邀请项目成员。
           </p>
 
           <div className="tsw-groupOptionGrid">
@@ -61,24 +95,34 @@ export function CreateProjectGroupStep({
                 <strong>关联已有群聊</strong>
                 <p className="tsw-muted">从当前用户可访问的 WPS 群聊中选择</p>
               </div>
-              <button type="button" className="tsw-btn" disabled>
+              <button
+                type="button"
+                className="tsw-btn"
+                disabled={submitting || creating}
+                onClick={() => setShowChatPicker(true)}
+              >
                 选择群聊
               </button>
             </div>
             <div className="tsw-groupOptionCard">
               <span className="tsw-groupOptionIcon tsw-groupOptionIconCreate" aria-hidden="true">＋</span>
               <div>
-                <strong>创建新的项目群</strong>
+                <strong>一键创建项目群</strong>
                 <p className="tsw-muted">创建群聊并自动邀请当前项目成员</p>
               </div>
-              <button type="button" className="tsw-btn" disabled>
-                创建项目群
+              <button
+                type="button"
+                className="tsw-btn tsw-btnPrimary tsw-btnSolid"
+                disabled={submitting || creating}
+                onClick={() => void handleCreateGroup(false)}
+              >
+                {creating ? '创建中…' : '创建项目群'}
               </button>
             </div>
           </div>
 
           <div className="tsw-formRow">
-            <label className="tsw-fieldLabel" htmlFor="group-name">群名称（Demo 可选填）</label>
+            <label className="tsw-fieldLabel" htmlFor="group-name">群名称</label>
             <input
               id="group-name"
               className="tsw-input"
@@ -88,12 +132,17 @@ export function CreateProjectGroupStep({
             />
           </div>
 
-          <div className="tsw-infoBanner">
-            <span aria-hidden="true">ℹ️</span>
-            <span>
-              当前版本暂不调用 WPS 群聊能力，项目创建后可在「项目群」页面继续配置。
-            </span>
-          </div>
+          {groupId ? (
+            <div className="tsw-infoBanner">
+              <span aria-hidden="true">✓</span>
+              <span>已关联群聊：{groupName || groupId}</span>
+            </div>
+          ) : (
+            <div className="tsw-infoBanner">
+              <span aria-hidden="true">ℹ️</span>
+              <span>也可跳过此步骤，稍后在项目「项目群」Tab 中继续配置。</span>
+            </div>
+          )}
 
           <div className="tsw-createSummary">
             <h4>创建内容确认</h4>
@@ -115,9 +164,9 @@ export function CreateProjectGroupStep({
             onPrev={onPrev}
             skipLabel="跳过并创建"
             onSkip={() => void finish(true)}
-            nextLabel="创建项目"
+            nextLabel="完成创建"
             onNext={() => void finish(false)}
-            nextLoading={submitting}
+            nextLoading={submitting || creating}
             showSkip
           />
         </div>
@@ -126,16 +175,25 @@ export function CreateProjectGroupStep({
       <aside className="tsw-createAside">
         <div className="tsw-createAsideCard">
           <div className="tsw-createAsideHead">
-            <strong>项目群后续能力</strong>
-            <span className="tsw-badge tsw-badgeMuted">后续开放</span>
+            <strong>项目群能力</strong>
+            <span className="tsw-badge">WPS IM</span>
           </div>
           <ul className="tsw-createAsideList">
-            <li>项目通知与状态同步</li>
-            <li>群内 @机器人 查询项目</li>
-            <li>需求、Bug、任务推送</li>
+            <li>一键邀请项目成员进群</li>
+            <li>关联已有企业群聊</li>
+            <li>项目通知与状态同步（规划中）</li>
           </ul>
         </div>
       </aside>
+
+      {showChatPicker ? (
+        <WpsChatPickerDialog
+          onClose={() => setShowChatPicker(false)}
+          onSelect={async (chat) => {
+            await saveGroup(chat.id, chat.name || groupName.trim() || `${project.name} 项目群`, false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

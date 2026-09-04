@@ -6,6 +6,8 @@ export type RequirementType =
   | 'TECH_DEBT'
   | 'BUG_FIX';
 
+export type RequirementDevDirection = 'FRONTEND' | 'BACKEND';
+
 export interface RequirementDraft {
   title: string;
   description: string;
@@ -14,9 +16,17 @@ export interface RequirementDraft {
   plannedStart: string;
   plannedEnd: string;
   acceptanceCriteria: string;
-  productOwnerUserId?: number;
+  /** 一个需求仅一个研发方向 */
+  devDirection: RequirementDevDirection;
+  developerUserId?: number;
+  testerUserId?: number;
   watcherUserIds?: number[];
 }
+
+export const REQUIREMENT_DEV_DIRECTION_OPTIONS: { value: RequirementDevDirection; label: string }[] = [
+  { value: 'FRONTEND', label: '前端' },
+  { value: 'BACKEND', label: '后端' },
+];
 
 export const REQUIREMENT_PRIORITY_OPTIONS: { value: RequirementPriority; label: string }[] = [
   { value: 'HIGH', label: '高' },
@@ -48,6 +58,7 @@ export function createEmptyRequirementDraft(): RequirementDraft {
     plannedStart: '',
     plannedEnd: '',
     acceptanceCriteria: '',
+    devDirection: 'FRONTEND',
   };
 }
 

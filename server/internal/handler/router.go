@@ -6,14 +6,15 @@ import (
 	"strings"
 
 	"github.com/66hackathon/dsh-wps-workflow/server/internal/auth/session"
+	"github.com/66hackathon/dsh-wps-workflow/server/internal/auth/wps"
 	"github.com/66hackathon/dsh-wps-workflow/server/internal/config"
 	"github.com/66hackathon/dsh-wps-workflow/server/internal/repository"
 )
 
 // NewRouter builds the TeamSpace HTTP handler tree.
-func NewRouter(cfg config.Config, repo *repository.Repository, auth *AuthHandler, _ *session.Manager) http.Handler {
+func NewRouter(cfg config.Config, repo *repository.Repository, auth *AuthHandler, _ *session.Manager, wpsClient *wps.Client) http.Handler {
 	mux := http.NewServeMux()
-	handlers := NewHandlers(repo, auth)
+	handlers := NewHandlers(repo, auth, wpsClient)
 	registerRoutes(mux, handlers, cfg)
 	return withCORS(cfg, auth.Middleware(mux))
 }

@@ -2,8 +2,6 @@ import type {
   AuthConfig,
   AuthStatus,
   Bug,
-  Conversation,
-  ConversationMessage,
   LoginInitResponse,
   OrgUser,
   Project,
@@ -13,6 +11,7 @@ import type {
   TeamspaceUser,
   WorkspaceSummary,
 } from '../types';
+import type { WpsChat, WpsContact, WpsDocument } from '../types/wps';
 
 const TOKEN_KEY = 'teamspace_token';
 
@@ -102,8 +101,6 @@ export const api = {
     payload: {
       name?: string;
       description?: string;
-      git_repo_url?: string;
-      git_default_branch?: string;
       wps_group_id?: string;
       wps_group_name?: string;
     },
@@ -112,12 +109,52 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
+  listProjectRepositories: (projectId: number) =>
+    request<{ items: import('../types').ProjectRepository[] }>(`/api/projects/${projectId}/repositories`),
+  replaceProjectRepositories: (
+    projectId: number,
+    items: Array<{
+      repo_url: string;
+      default_branch?: string;
+      dev_direction: string;
+      sort_order?: number;
+    }>,
+  ) =>
+    request<{ items: import('../types').ProjectRepository[] }>(`/api/projects/${projectId}/repositories`, {
+      method: 'PUT',
+      body: JSON.stringify({ items }),
+    }),
+  createProjectRepository: (
+    projectId: number,
+    payload: {
+      repo_url: string;
+      default_branch?: string;
+      dev_direction: string;
+      sort_order?: number;
+    },
+  ) =>
+    request<import('../types').ProjectRepository>(`/api/projects/${projectId}/repositories`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteProjectRepository: (projectId: number, repoId: number) =>
+    request<{ status: string }>(`/api/projects/${projectId}/repositories/${repoId}`, {
+      method: 'DELETE',
+    }),
   deleteProject: (projectId: number) =>
     request<{ status: string }>(`/api/projects/${projectId}`, { method: 'DELETE' }),
 
   listRequirements: (projectId: number) =>
     request<{ items: Requirement[] }>(`/api/projects/${projectId}/requirements`),
   getRequirement: (id: number) => request<Requirement>(`/api/requirements/${id}`),
+  updateRequirement: (
+    id: number,
+    payload: { title: string; description: string; priority: string },
+  ) =>
+    request<Requirement>(`/api/requirements/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
   getRequirementTimeline: (id: number) =>
     request<RequirementTimeline>(`/api/requirements/${id}/timeline`),
   createRequirement: (
@@ -129,7 +166,10 @@ export const api = {
       priority?: string;
       requirement_type?: string;
       acceptance_criteria?: string;
-      product_owner_user_id?: number;
+      dev_directions?: string;
+      developer_user_id?: number;
+      backend_developer_user_id?: number;
+      tester_user_id?: number;
       planned_start_at?: string;
       planned_end_at?: string;
     },
@@ -148,6 +188,11 @@ export const api = {
       review_result?: string;
       review_comment?: string;
       reviewer_user_id?: number;
+      acceptance_note?: string;
+      accept_result?: string;
+      release_note?: string;
+      closed_by_user_id?: number;
+      dev_design_doc?: string;
       dev_summary?: string;
       implementation_notes?: string;
       developer_user_id?: number;
@@ -156,8 +201,9 @@ export const api = {
       test_cases_covered?: string;
       test_result?: string;
       tester_user_id?: number;
-      release_note?: string;
-      closed_by_user_id?: number;
+      return_reason?: string;
+      regression_result?: string;
+      regression_summary?: string;
       remark?: string;
     },
   ) =>
@@ -184,9 +230,23 @@ export const api = {
 
   listBugs: (projectId: number) => request<{ items: Bug[] }>(`/api/projects/${projectId}/bugs`),
   listRequirementBugs: (requirementId: number) =>
-    request<{ items: Bug[] }>(`/api/requirements/${requirementId}/bugs`),
+    request<{ items: Requirement[] }>(`/api/requirements/${requirementId}/bugs`),
   listChildRequirements: (requirementId: number) =>
-    request<{ items: Requirement[] }>(`/api/requirements/${requirementId}/children`),
+    request<{ items: Requirement[] }>(`/api/requirements/${requirementId}/bugs`),
+  createRequirementBug: (
+    requirementId: number,
+    payload: {
+      requirement_code: string;
+      title: string;
+      description?: string;
+      priority?: string;
+      triggered_at_stage?: string;
+    },
+  ) =>
+    request<{ bug: Requirement; main_requirement: Requirement }>(`/api/requirements/${requirementId}/bugs`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   createBug: (
     projectId: number,
     payload: {
@@ -224,6 +284,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ remark: remark ?? '' }),
     }),
+  updateRegressionResult: (requirementId: number, regressionSummary?: string) =>
+    request<{ status: string }>(`/api/requirements/${requirementId}/regression`, {
+      method: 'PATCH',
+      body: JSON.stringify({ regression_summary: regressionSummary ?? '' }),
+    }),
   submitBugRetest: (
     bugId: number,
     result: 'PASS' | 'FAIL',
@@ -238,22 +303,42 @@ export const api = {
       body: JSON.stringify({ result, remark: remark ?? '' }),
     }),
 
-  listConversations: (projectId: number) =>
-    request<{ items: Conversation[] }>(`/api/projects/${projectId}/conversations`),
-  getConversation: (id: number) => request<Conversation>(`/api/conversations/${id}`),
-  createConversation: (
-    projectId: number,
-    payload: { title: string; conversation_type?: string; requirement_id?: number },
-  ) =>
-    request<Conversation>(`/api/projects/${projectId}/conversations`, {
+  searchWpsContacts: (keyword: string) =>
+    request<{ items: WpsContact[] }>(`/api/wps/contacts/search?keyword=${encodeURIComponent(keyword)}`),
+  ensureWpsContacts: (items: Array<{
+    wps_user_id: string;
+    name?: string;
+    nick_name?: string;
+    email?: string;
+    avatar_url?: string;
+  }>) =>
+    request<{ items: OrgUser[] }>('/api/wps/contacts/ensure', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+  listWpsChats: (keyword = '') => {
+    const query = keyword ? `?keyword=${encodeURIComponent(keyword)}` : '';
+    return request<{ items: WpsChat[] }>(`/api/wps/chats${query}`);
+  },
+  createWpsGroupChat: (payload: {
+    name: string;
+    owner_wps_user_id?: string;
+    member_wps_user_ids?: string[];
+  }) =>
+    request<WpsChat>('/api/wps/chats/create', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  listMessages: (conversationId: number) =>
-    request<{ items: ConversationMessage[] }>(`/api/conversations/${conversationId}/messages`),
-  sendMessage: (conversationId: number, content: string) =>
-    request<{ user_message: ConversationMessage; assistant_message: ConversationMessage }>(
-      `/api/conversations/${conversationId}/messages`,
-      { method: 'POST', body: JSON.stringify({ content }) },
-    ),
+  createProjectWpsGroup: (projectId: number, name?: string) =>
+    request<{ chat: WpsChat; project: Project }>(`/api/projects/${projectId}/wps/create-group`, {
+      method: 'POST',
+      body: JSON.stringify(name ? { name } : {}),
+    }),
+  searchWpsDocuments: (keyword = '', smartOnly = false) => {
+    const params = new URLSearchParams();
+    if (keyword) params.set('keyword', keyword);
+    if (smartOnly) params.set('smart_only', 'true');
+    const query = params.toString();
+    return request<{ items: WpsDocument[] }>(`/api/wps/documents${query ? `?${query}` : ''}`);
+  },
 };

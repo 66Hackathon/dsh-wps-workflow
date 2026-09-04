@@ -11,6 +11,9 @@ import { ProjectOverview } from './ProjectOverview';
 import { ProjectSettingsPanel } from './ProjectSettingsPanel';
 import { RequirementDetailView } from './RequirementDetailView';
 import { RequirementListPanel } from './RequirementListPanel';
+import { RequirementViewDialog } from './RequirementViewDialog';
+import { WpsDocumentsPanel } from './wps/WpsDocumentsPanel';
+import { WpsGroupChatPanel } from './wps/WpsGroupChatPanel';
 
 interface Props {
   project: Project;
@@ -39,6 +42,7 @@ export function ProjectWorkspace({
   const [showSettings, setShowSettings] = useState(initialEntry === 'settings');
   const [requirementsView, setRequirementsView] = useState<RequirementsView>('list');
   const [selectedRequirementId, setSelectedRequirementId] = useState<number | null>(null);
+  const [viewingRequirementId, setViewingRequirementId] = useState<number | null>(null);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [bugs, setBugs] = useState<Bug[]>([]);
   const [members, setMembers] = useState(project.members ?? []);
@@ -108,15 +112,13 @@ export function ProjectWorkspace({
   };
 
   const lockedTabNotes: Partial<Record<ProjectTab, string>> = {
-    documents: 'WPS 文档关联能力 Demo 暂未开放。',
     repository: 'GitLab 代码仓库集成 Demo 暂未开放。',
-    group: '创建 WPS 项目群 Demo 暂未开放。正式版将调用 WPS IM 接口。',
-    conversations: '项目内会话 Demo 暂未开放。',
   };
 
-  const lockedTabs: ProjectTab[] = ['documents', 'repository', 'group', 'conversations'];
+  const lockedTabs: ProjectTab[] = ['repository'];
 
   const selectedRequirement = requirements.find((r) => r.id === selectedRequirementId) ?? null;
+  const viewingRequirement = requirements.find((r) => r.id === viewingRequirementId) ?? null;
   const inRequirementFlow = !showSettings && tab === 'requirements' && requirementsView !== 'list';
 
   const refreshRequirements = () => {
@@ -129,6 +131,19 @@ export function ProjectWorkspace({
   const openRequirementDetail = (requirementId: number) => {
     setSelectedRequirementId(requirementId);
     setRequirementsView('detail');
+  };
+
+  const handleRequirementUpdated = (updated: Requirement) => {
+    setRequirements((prev) => {
+      const exists = prev.some((item) => item.id === updated.id);
+      if (exists) {
+        return prev.map((item) => (item.id === updated.id ? updated : item));
+      }
+      return [updated, ...prev];
+    });
+    if (updated.parent_requirement_id == null) {
+      refreshRequirements();
+    }
   };
 
   const openSettings = () => {
@@ -216,18 +231,7 @@ export function ProjectWorkspace({
                   openRequirementDetail(requirementId);
                 })();
               }}
-              onRequirementUpdated={(updated) => {
-                setRequirements((prev) => {
-                  const exists = prev.some((item) => item.id === updated.id);
-                  if (exists) {
-                    return prev.map((item) => (item.id === updated.id ? updated : item));
-                  }
-                  return [updated, ...prev];
-                });
-                if (updated.parent_requirement_id == null) {
-                  refreshRequirements();
-                }
-              }}
+              onRequirementUpdated={handleRequirementUpdated}
             />
           );
         }
@@ -238,6 +242,7 @@ export function ProjectWorkspace({
             loading={loadingRequirements}
             onCreate={() => setRequirementsView('create')}
             onOpen={openRequirementDetail}
+            onView={setViewingRequirementId}
           />
         );
       case 'members':
@@ -252,6 +257,21 @@ export function ProjectWorkspace({
               onMembersChange={handleMembersChange}
             />
           </div>
+        );
+      case 'documents':
+        return (
+          <WpsDocumentsPanel
+            project={project}
+            canManage={canManageMembers}
+          />
+        );
+      case 'group':
+        return (
+          <WpsGroupChatPanel
+            project={project}
+            canManage={canManageMembers}
+            onProjectUpdated={onProjectUpdated}
+          />
         );
       default:
         return null;
@@ -327,6 +347,15 @@ export function ProjectWorkspace({
       ) : null}
       {lockedFeature ? (
         <FeatureLockedDialog label={lockedFeature} onClose={() => setLockedFeature(null)} />
+      ) : null}
+      {viewingRequirement ? (
+        <RequirementViewDialog
+          requirement={viewingRequirement}
+          members={members}
+          currentUserId={currentUserId}
+          onClose={() => setViewingRequirementId(null)}
+          onUpdated={handleRequirementUpdated}
+        />
       ) : null}
     </div>
   );

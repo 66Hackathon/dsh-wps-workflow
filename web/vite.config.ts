@@ -1,12 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-const apiTarget = process.env.TEAMSPACE_API_URL ?? 'http://127.0.0.1:8090';
+const apiTarget = process.env.TEAMSPACE_API_URL ?? 'http://10.213.21.202:8090';
 
 export default defineConfig({
   plugins: [react()],
   server: {
-    host: '127.0.0.1',
+    host: true, // 0.0.0.0，局域网可访问
     port: 5173,
     proxy: {
       '/api': {

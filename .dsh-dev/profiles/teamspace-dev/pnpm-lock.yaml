@@ -1,0 +1,13 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: false
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@66hackathon/dsh-teamspace':
+        specifier: link:/data/code/document/dsh‑wps‑workflow/plugin-teamspace
+        version: link:../../../plugin-teamspace

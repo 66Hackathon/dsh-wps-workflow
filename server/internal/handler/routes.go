@@ -3,34 +3,34 @@ package handler
 import (
 	"net/http"
 
+	"github.com/66hackathon/dsh-wps-workflow/server/internal/auth/wps"
 	"github.com/66hackathon/dsh-wps-workflow/server/internal/config"
 	"github.com/66hackathon/dsh-wps-workflow/server/internal/repository"
 )
 
 // Handlers groups HTTP handlers for route registration.
 type Handlers struct {
-	Auth         *AuthHandler
-	Project      *ProjectHandler
-	User         *UserHandler
-	Requirement  *RequirementHandler
-	Bug          *BugHandler
-	AI           *AIHandler
-	Conversation *ConversationHandler
-	Repo         *repository.Repository
+	Auth        *AuthHandler
+	Project     *ProjectHandler
+	User        *UserHandler
+	Requirement *RequirementHandler
+	Bug         *BugHandler
+	AI          *AIHandler
+	WPS         *WPSHandler
+	Repo        *repository.Repository
 }
 
 // NewHandlers constructs all handler dependencies.
-func NewHandlers(repo *repository.Repository, auth *AuthHandler) *Handlers {
-	ai := NewAIHandler()
+func NewHandlers(repo *repository.Repository, auth *AuthHandler, wpsClient *wps.Client) *Handlers {
 	return &Handlers{
-		Auth:         auth,
-		Project:      NewProjectHandler(repo, auth),
-		User:         NewUserHandler(repo, auth),
-		Requirement:  NewRequirementHandler(repo, auth),
-		Bug:          NewBugHandler(repo, auth),
-		AI:           ai,
-		Conversation: NewConversationHandler(repo, auth, ai),
-		Repo:         repo,
+		Auth:        auth,
+		Project:     NewProjectHandler(repo, auth),
+		User:        NewUserHandler(repo, auth),
+		Requirement: NewRequirementHandler(repo, auth),
+		Bug:         NewBugHandler(repo, auth),
+		AI:          NewAIHandler(),
+		WPS:         NewWPSHandler(repo, auth, wpsClient),
+		Repo:        repo,
 	}
 }
 
@@ -66,38 +66,41 @@ func registerRoutes(mux *http.ServeMux, h *Handlers, cfg config.Config) {
 	mux.HandleFunc("POST /api/projects", auth(h.Project.handleCreate))
 	mux.HandleFunc("PATCH /api/projects/{id}/setup", auth(h.Project.handleUpdateSetup))
 	mux.HandleFunc("DELETE /api/projects/{id}", auth(h.Project.handleDelete))
+	mux.HandleFunc("GET /api/projects/{id}/repositories", auth(h.Project.handleListRepositories))
+	mux.HandleFunc("POST /api/projects/{id}/repositories", auth(h.Project.handleCreateRepository))
+	mux.HandleFunc("PUT /api/projects/{id}/repositories", auth(h.Project.handleReplaceRepositories))
+	mux.HandleFunc("PATCH /api/projects/{id}/repositories/{repoId}", auth(h.Project.handleUpdateRepository))
+	mux.HandleFunc("DELETE /api/projects/{id}/repositories/{repoId}", auth(h.Project.handleDeleteRepository))
 	mux.HandleFunc("GET /api/projects/{id}/members", auth(h.Project.handleListMembers))
 	mux.HandleFunc("POST /api/projects/{id}/members", auth(h.Project.handleAddMember))
 	mux.HandleFunc("PATCH /api/projects/{id}/members/{memberId}", auth(h.Project.handleUpdateMember))
 	mux.HandleFunc("DELETE /api/projects/{id}/members/{memberId}", auth(h.Project.handleRemoveMember))
 
-	// ── Requirements ───────────────────────────────────────────────────────
-	mux.HandleFunc("GET /api/requirements/transition-rules", auth(h.Requirement.handleTransitionRules))
+	// ── Requirements / Work Items ──────────────────────────────────────────
 	mux.HandleFunc("GET /api/projects/{projectId}/requirements", auth(h.Requirement.handleList))
 	mux.HandleFunc("POST /api/projects/{projectId}/requirements", auth(h.Requirement.handleCreate))
 	mux.HandleFunc("GET /api/requirements/{id}", auth(h.Requirement.handleGet))
+	mux.HandleFunc("PATCH /api/requirements/{id}", auth(h.Requirement.handleUpdate))
 	mux.HandleFunc("GET /api/requirements/{id}/timeline", auth(h.Requirement.handleTimeline))
-	mux.HandleFunc("GET /api/requirements/{id}/bugs", auth(h.Requirement.handleListBugs))
-	mux.HandleFunc("GET /api/requirements/{id}/children", auth(h.Requirement.handleListChildren))
 	mux.HandleFunc("POST /api/requirements/{id}/transition", auth(h.Requirement.handleTransition))
 	mux.HandleFunc("POST /api/requirements/{id}/development/complete", auth(h.Requirement.handleCompleteDevelopment))
-	mux.HandleFunc("POST /api/requirements/{id}/bug-fix/complete", auth(h.Requirement.handleCompleteBugFix))
-	mux.HandleFunc("POST /api/requirements/{id}/bug-fix/resume-testing", auth(h.Requirement.handleResumeTesting))
-
-	// ── Bugs ─────────────────────────────────────────────────────────────────
-	mux.HandleFunc("GET /api/projects/{projectId}/bugs", auth(h.Bug.handleList))
-	mux.HandleFunc("POST /api/projects/{projectId}/bugs", auth(h.Bug.handleCreate))
-	mux.HandleFunc("POST /api/bugs/{id}/retest", auth(h.Bug.handleRetest))
+	// Bug 子项（item_type = BUG，挂在主工作项下）
+	mux.HandleFunc("GET /api/requirements/{id}/bugs", auth(h.Requirement.handleListBugs))
+	mux.HandleFunc("POST /api/requirements/{id}/bugs", auth(h.Requirement.handleCreateBug))
+	// 回归结果变更（FAIL → PASS）
+	mux.HandleFunc("PATCH /api/requirements/{id}/regression", auth(h.Requirement.handleUpdateRegression))
 
 	// ── AI（stub）────────────────────────────────────────────────────────────
 	mux.HandleFunc("POST /api/ai/run", auth(h.AI.handleRun))
 
-	// ── Conversations ────────────────────────────────────────────────────────
-	mux.HandleFunc("GET /api/projects/{projectId}/conversations", auth(h.Conversation.handleList))
-	mux.HandleFunc("POST /api/projects/{projectId}/conversations", auth(h.Conversation.handleCreate))
-	mux.HandleFunc("GET /api/conversations/{id}", auth(h.Conversation.handleGet))
-	mux.HandleFunc("GET /api/conversations/{id}/messages", auth(h.Conversation.handleListMessages))
-	mux.HandleFunc("POST /api/conversations/{id}/messages", auth(h.Conversation.handleSendMessage))
+	// ── WPS 协作能力（通讯录 / 群聊 / 云文档）──────────────────────────────
+	mux.HandleFunc("GET /api/wps/contacts/search", auth(h.WPS.handleSearchContacts))
+	mux.HandleFunc("POST /api/wps/contacts/ensure", auth(h.WPS.handleEnsureContacts))
+	mux.HandleFunc("GET /api/wps/chats", auth(h.WPS.handleListChats))
+	mux.HandleFunc("POST /api/wps/chats/create", auth(h.WPS.handleCreateChat))
+	mux.HandleFunc("POST /api/projects/{id}/wps/create-group", auth(h.WPS.handleCreateProjectGroup))
+	mux.HandleFunc("GET /api/wps/documents", auth(h.WPS.handleSearchDocuments))
+
 }
 
 func (h *Handlers) handleListProjects(w http.ResponseWriter, r *http.Request) {

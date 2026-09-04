@@ -1,26 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { userAvatarColor, userAvatarLetter, userDisplayName } from '../memberRoles';
 import {
+  DEVELOPER_ONLY_HINT,
+  isRequirementDeveloper,
   isRequirementProductOwner,
   PRODUCT_OWNER_ONLY_HINT,
 } from '../requirementPermissions';
 import { PRIORITY_LABELS } from '../requirementCreate';
 import {
-  excludeUserIdsForDevAssignPicker,
-  requirementRoleDraftFromRequirement,
-  UNIQUE_REQUIREMENT_ROLE_HINT,
-  validateUniqueRequirementRoles,
-} from '../requirementRoles';
-import {
   REQUIREMENT_PHASE_BADGE,
+  REQUIREMENT_PHASE_OWNER_ROLE_LABEL,
   REQUIREMENT_PHASE_STEPS,
   isRequirementStepReachable,
   resolveRequirementPhaseIndex,
+  resolveRequirementPhaseOwnerRole,
+  resolveRequirementPhaseOwnerUserId,
   resolveRequirementPhaseStates,
 } from '../requirementPhase';
 import type { Project, ProjectMember, Requirement, RequirementTimeline } from '../types';
+import type { WpsDocument } from '../types/wps';
+import { wpsDocumentHref } from '../types/wps';
 import { FeatureLockedDialog } from './FeatureLockedDialog';
+import { WpsDocumentPickerDialog } from './wps/WpsDocumentPickerDialog';
 import { DevPhaseViewBadge, RequirementDevPhaseAside, RequirementDevPhaseMain, useDevPhaseViewContext } from './RequirementDevPhasePanel';
 import { RequirementPhaseHistoryPanel } from './RequirementPhaseHistoryPanel';
 import {
@@ -35,6 +37,8 @@ import {
   RequirementBugFixingPanel,
 } from './RequirementBugFixPanel';
 import { RequirementAcceptancePanel } from './RequirementAcceptancePanel';
+import { RequirementRegressionPanel } from './RequirementRegressionPanel';
+import { RequirementViewDialog } from './RequirementViewDialog';
 
 interface Props {
   project: Project;
@@ -46,235 +50,25 @@ interface Props {
   onOpenRequirement?: (requirementId: number) => void;
 }
 
-interface DemoDocument {
-  id: string;
-  title: string;
-  tags: { label: string; tone: 'blue' | 'yellow' | 'muted' }[];
-  creator: string;
-  updatedAt: string;
-}
-
-interface DemoMaterial {
-  id: string;
-  title: string;
-  subtitle: string;
-}
-
-const DEMO_MATERIALS: DemoMaterial[] = [
-  { id: 'm1', title: '用户登录现状说明', subtitle: 'WPS 在线文档' },
-  { id: 'm2', title: '8月需求评审会议纪要', subtitle: '会议纪要' },
-];
-
-type DevAssignSlot = 'frontend' | 'backend' | 'tester';
-
-interface DevAssignSlotConfig {
-  slot: DevAssignSlot;
-  label: string;
-  roleTag: string;
-}
-
-const DEV_ASSIGN_SLOTS: DevAssignSlotConfig[] = [
-  { slot: 'frontend', label: '前端负责人', roleTag: '前端开发' },
-  { slot: 'backend', label: '后端负责人', roleTag: '后端开发' },
-  { slot: 'tester', label: '测试负责人', roleTag: '测试' },
-];
-
 function memberByUserId(members: ProjectMember[], userId?: number): ProjectMember | null {
   if (!userId) return null;
   return members.find((m) => m.user_id === userId) ?? null;
 }
 
 function defaultDevAssignees(
-  members: ProjectMember[],
-  productOwnerUserId?: number,
-  developerUserId?: number,
-  backendDeveloperUserId?: number,
-  testerUserId?: number,
+  requirement: Requirement,
 ): { frontendUserId?: number; backendUserId?: number; testerUserId?: number } {
-  if (!members.length) return {};
-  const occupied = new Set<number>();
-  if (productOwnerUserId) occupied.add(productOwnerUserId);
-
-  const pool = members.filter((m) => !occupied.has(m.user_id));
-  const fallback = pool.length ? pool : members.filter((m) => m.user_id !== productOwnerUserId);
-
-  let frontendUserId = developerUserId;
-  if (frontendUserId && occupied.has(frontendUserId)) {
-    frontendUserId = undefined;
-  }
-  const frontendMember = memberByUserId(members, frontendUserId)
-    ?? fallback.find((m) => !occupied.has(m.user_id))
-    ?? fallback[0];
-  if (frontendMember) occupied.add(frontendMember.user_id);
-
-  let backendUserId = backendDeveloperUserId;
-  if (backendUserId && occupied.has(backendUserId)) {
-    backendUserId = undefined;
-  }
-  const backendMember = memberByUserId(members, backendUserId)
-    ?? fallback.find((m) => !occupied.has(m.user_id))
-    ?? fallback.find((m) => m.user_id !== frontendMember?.user_id)
-    ?? fallback[1]
-    ?? fallback[0];
-  if (backendMember) occupied.add(backendMember.user_id);
-
-  let resolvedTesterId = testerUserId;
-  if (resolvedTesterId && occupied.has(resolvedTesterId)) {
-    resolvedTesterId = undefined;
-  }
-  const testerMember = memberByUserId(members, resolvedTesterId)
-    ?? fallback.find((m) => !occupied.has(m.user_id))
-    ?? fallback.find((m) => m.user_id !== frontendMember?.user_id && m.user_id !== backendMember?.user_id)
-    ?? fallback[2]
-    ?? fallback[0];
-
+  const directions = (requirement.dev_directions || 'FRONTEND')
+    .split(',')
+    .map((d) => d.trim().toUpperCase())
+    .filter(Boolean);
+  const needFrontend = directions.includes('FRONTEND') || directions.length === 0;
+  const needBackend = directions.includes('BACKEND');
   return {
-    frontendUserId: frontendMember?.user_id,
-    backendUserId: backendMember?.user_id,
-    testerUserId: testerMember?.user_id,
+    frontendUserId: needFrontend ? requirement.developer_user_id : undefined,
+    backendUserId: needBackend ? requirement.backend_developer_user_id : undefined,
+    testerUserId: requirement.tester_user_id,
   };
-}
-
-interface MemberPickerDialogProps {
-  title: string;
-  members: ProjectMember[];
-  selectedUserId?: number;
-  excludeUserIds?: number[];
-  onClose: () => void;
-  onSelect: (member: ProjectMember) => void;
-}
-
-function MemberPickerDialog({
-  title,
-  members,
-  selectedUserId,
-  excludeUserIds = [],
-  onClose,
-  onSelect,
-}: MemberPickerDialogProps) {
-  const [search, setSearch] = useState('');
-  const searchRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const onDocClick = (event: MouseEvent) => {
-      if (!searchRef.current?.contains(event.target as Node)) return;
-    };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, []);
-
-  const filteredMembers = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const excluded = new Set(excludeUserIds);
-    return members.filter((m) => {
-      if (excluded.has(m.user_id)) return false;
-      if (!q) return true;
-      return m.user_name.toLowerCase().includes(q);
-    });
-  }, [members, search, excludeUserIds]);
-
-  return (
-    <div
-      className="tsw-dialogBackdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="tsw-memberDialog" role="dialog" aria-modal="true" aria-label={title}>
-        <button
-          type="button"
-          className="tsw-profileDialogClose"
-          aria-label="关闭"
-          onClick={onClose}
-        >
-          ×
-        </button>
-        <h3 className="tsw-memberDialogTitle">{title}</h3>
-        <p className="tsw-muted tsw-memberDialogSub">
-          从当前项目成员中选择；{UNIQUE_REQUIREMENT_ROLE_HINT}，已担任其他职能的成员不会出现在列表中。
-        </p>
-        <div className="tsw-memberSearchWrap" ref={searchRef}>
-          <div className="tsw-memberSearchBox">
-            <span className="tsw-memberSearchIcon" aria-hidden="true">🔍</span>
-            <input
-              className="tsw-memberSearchInput"
-              placeholder="搜索成员姓名"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              autoFocus
-            />
-          </div>
-          <div className="tsw-memberSearchDropdown">
-            {filteredMembers.length ? filteredMembers.map((member) => {
-              const label = userDisplayName(member.user_name);
-              const active = selectedUserId === member.user_id;
-              return (
-                <button
-                  key={member.id}
-                  type="button"
-                  className={`tsw-memberSearchOption tsw-memberSearchOptionBtn${active ? ' tsw-memberSearchOptionActive' : ''}`}
-                  onClick={() => {
-                    onSelect(member);
-                    onClose();
-                  }}
-                >
-                  <span
-                    className="tsw-memberAvatar"
-                    style={{ background: userAvatarColor(label) }}
-                  >
-                    {userAvatarLetter(label)}
-                  </span>
-                  <span className="tsw-memberSearchOptionText">
-                    <strong>{label}</strong>
-                  </span>
-                </button>
-              );
-            }) : (
-              <p className="tsw-muted tsw-memberSearchEmpty">未找到匹配成员</p>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface DevAssignRowProps {
-  config: DevAssignSlotConfig;
-  member: ProjectMember | null;
-  canEdit: boolean;
-  onChange: () => void;
-}
-
-function DevAssignRow({ config, member, canEdit, onChange }: DevAssignRowProps) {
-  const label = member ? userDisplayName(member.user_name) : '未指定';
-  return (
-    <div className="tsw-reqDevAssignRow">
-      <div className="tsw-reqDevAssignLabel">
-        {config.label}
-        <span className="tsw-required">（必填）</span>
-      </div>
-      <div className="tsw-reqDevAssignPerson">
-        <span
-          className="tsw-userAvatar"
-          style={{ background: userAvatarColor(label) }}
-          aria-hidden="true"
-        >
-          {userAvatarLetter(label)}
-        </span>
-        <strong>{label}</strong>
-        {member ? <span className="tsw-reqRoleTag">{config.roleTag}</span> : null}
-      </div>
-      {canEdit ? (
-        <button type="button" className="tsw-linkBtn" onClick={onChange}>
-          更换
-        </button>
-      ) : (
-        <span className="tsw-tag tsw-tagMuted" title={PRODUCT_OWNER_ONLY_HINT}>只读</span>
-      )}
-    </div>
-  );
 }
 
 function AsidePerson({
@@ -301,21 +95,6 @@ function AsidePerson({
   );
 }
 
-function buildDemoDocuments(requirement: Requirement, ownerName: string): DemoDocument[] {
-  return [
-    {
-      id: 'doc-1',
-      title: `${requirement.requirement_code} 产品方案`,
-      tags: [
-        { label: 'AI 生成', tone: 'blue' },
-        { label: '待完善', tone: 'yellow' },
-      ],
-      creator: ownerName,
-      updatedAt: '刚刚更新',
-    },
-  ];
-}
-
 export function RequirementDetailView({
   project,
   requirement,
@@ -328,13 +107,16 @@ export function RequirementDetailView({
   const [lockedFeature, setLockedFeature] = useState<string | null>(null);
   const [transitioning, setTransitioning] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [pickerSlot, setPickerSlot] = useState<DevAssignSlot | null>(null);
   const [frontendUserId, setFrontendUserId] = useState<number | undefined>();
   const [backendUserId, setBackendUserId] = useState<number | undefined>();
   const [testerUserId, setTesterUserId] = useState<number | undefined>();
   const [timeline, setTimeline] = useState<RequirementTimeline | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(true);
   const [timelineError, setTimelineError] = useState<string | null>(null);
+  const [docPickerTarget, setDocPickerTarget] = useState<'product' | 'dev' | null>(null);
+  const [linkedProductDoc, setLinkedProductDoc] = useState<WpsDocument | null>(null);
+  const [linkedDevDoc, setLinkedDevDoc] = useState<WpsDocument | null>(null);
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
 
   const currentPhaseIndex = useMemo(
     () => resolveRequirementPhaseIndex(requirement.current_status),
@@ -348,34 +130,45 @@ export function RequirementDetailView({
   );
 
   const productOwner = useMemo(() => {
-    if (!requirement.product_owner_user_id) return null;
-    return members.find((m) => m.user_id === requirement.product_owner_user_id) ?? null;
-  }, [members, requirement.product_owner_user_id]);
+    const ownerId = requirement.created_by || requirement.product_owner_user_id;
+    if (!ownerId) return null;
+    return members.find((m) => m.user_id === ownerId) ?? null;
+  }, [members, requirement.created_by, requirement.product_owner_user_id]);
 
   const ownerName = productOwner
     ? userDisplayName(productOwner.user_name)
     : '未指定';
 
-  const isProductPhase = requirement.current_status === 'PRODUCT_EDITING';
-  const isAssignPhase = requirement.current_status === 'PRODUCT_REVIEW';
-  const isBugFixRequirement = requirement.development_scope === 'BUG_FIX';
-  const isDevPhase = requirement.current_status === 'DEVELOPMENT' && !isBugFixRequirement;
-  const isBugFixWorkPhase = isBugFixRequirement && (requirement.current_status === 'DEVELOPMENT' || requirement.current_status === 'DONE');
+  const isProductPhase = requirement.current_status === 'CREATED'
+    || requirement.current_status === 'PRODUCT_DESIGN';
+  const isDevDesignPhase = requirement.current_status === 'DEV_DESIGN';
+  const isLegacyBugFix = requirement.development_scope === 'BUG_FIX';
+  const isBugItem = requirement.item_type === 'BUG' || isLegacyBugFix;
+  const isDevPhase = requirement.current_status === 'DEVELOPMENT' && !isLegacyBugFix;
+  const isBugFixWorkPhase = isLegacyBugFix && (requirement.current_status === 'DEVELOPMENT' || requirement.current_status === 'DONE');
   const isTestPhase = requirement.current_status === 'TESTING';
   const isBugFixingPhase = requirement.current_status === 'BUG_FIXING';
-  const isAcceptancePhase = requirement.current_status === 'DONE' && !isBugFixRequirement;
+  const isAcceptancePhase = requirement.current_status === 'PRODUCT_ACCEPTANCE';
+  const isRegressionPhase = requirement.current_status === 'REGRESSION' && !isBugItem;
+  const isClosedPhase = requirement.current_status === 'CLOSED' && !isBugItem;
   const isViewingCurrentPhase = selectedPhaseIndex === currentPhaseIndex;
   const isHistoricalView = selectedPhaseIndex < currentPhaseIndex;
   const viewingStep = REQUIREMENT_PHASE_STEPS[selectedPhaseIndex] ?? REQUIREMENT_PHASE_STEPS[0];
-  const showActiveProductDocs = isViewingCurrentPhase && (isProductPhase || isAssignPhase);
-  const showDemoDocs = showActiveProductDocs;
-  const demoDocuments = useMemo(
-    () => buildDemoDocuments(requirement, ownerName),
-    [requirement, ownerName],
-  );
+  const phaseOwnerRole = resolveRequirementPhaseOwnerRole(viewingStep.id) ?? 'product';
+  const phaseOwnerRoleLabel = REQUIREMENT_PHASE_OWNER_ROLE_LABEL[phaseOwnerRole];
+  const phaseOwnerUserId = resolveRequirementPhaseOwnerUserId(viewingStep.id, requirement);
+  const phaseOwnerMember = phaseOwnerUserId
+    ? members.find((m) => m.user_id === phaseOwnerUserId) ?? null
+    : null;
+  const phaseOwnerName = phaseOwnerMember
+    ? userDisplayName(phaseOwnerMember.user_name)
+    : '未指定';
 
   useEffect(() => {
     setSelectedPhaseIndex(currentPhaseIndex);
+    setLinkedProductDoc(null);
+    setLinkedDevDoc(null);
+    setDocPickerTarget(null);
   }, [requirement.id, currentPhaseIndex]);
 
   useEffect(() => {
@@ -399,27 +192,18 @@ export function RequirementDetailView({
   }, [requirement.id, requirement.status_version]);
 
   useEffect(() => {
-    const defaults = defaultDevAssignees(
-      members,
-      requirement.product_owner_user_id,
-      requirement.developer_user_id,
-      requirement.backend_developer_user_id,
-      requirement.tester_user_id,
-    );
+    const defaults = defaultDevAssignees(requirement);
     setFrontendUserId(defaults.frontendUserId);
     setBackendUserId(defaults.backendUserId);
     setTesterUserId(defaults.testerUserId);
   }, [
     requirement.id,
-    requirement.product_owner_user_id,
+    requirement.dev_directions,
     requirement.developer_user_id,
     requirement.backend_developer_user_id,
     requirement.tester_user_id,
-    members,
   ]);
 
-  const frontendMember = memberByUserId(members, frontendUserId);
-  const backendMember = memberByUserId(members, backendUserId);
   const testerMember = memberByUserId(members, testerUserId);
 
   const testerName = testerMember
@@ -444,9 +228,10 @@ export function RequirementDetailView({
   );
 
   const canManageAsProductOwner = isRequirementProductOwner(requirement, currentUserId);
+  const canManageAsDeveloper = isRequirementDeveloper(requirement, currentUserId);
 
   const handleCompleteProductDesign = async () => {
-    if (requirement.current_status !== 'PRODUCT_EDITING') return;
+    if (!isProductPhase) return;
     if (!canManageAsProductOwner) {
       setActionError(PRODUCT_OWNER_ONLY_HINT);
       return;
@@ -454,10 +239,16 @@ export function RequirementDetailView({
     setTransitioning(true);
     setActionError(null);
     try {
-      const updated = await api.transitionRequirement(requirement.id, 'PRODUCT_REVIEW', {
-        spec_body: requirement.description || requirement.title,
-        acceptance_criteria: '产品文档已确认，进入评审阶段。',
-        product_owner_user_id: requirement.product_owner_user_id,
+      let current = requirement;
+      if (current.current_status === 'CREATED') {
+        current = await api.transitionRequirement(current.id, 'PRODUCT_DESIGN', {});
+      }
+      const spec = linkedProductDoc
+        ? `${current.description || current.title}\n\n[WPS文档] ${linkedProductDoc.name}${linkedProductDoc.link_url ? ` ${linkedProductDoc.link_url}` : ''}`
+        : (current.description || current.title || '产品方案已确认（未关联在线文档）');
+      const updated = await api.transitionRequirement(current.id, 'DEV_DESIGN', {
+        spec_body: spec,
+        acceptance_criteria: '产品方案已确认，进入研发方案设计。',
       });
       onRequirementUpdated(updated);
     } catch (err) {
@@ -467,48 +258,21 @@ export function RequirementDetailView({
     }
   };
 
-  const roleDraft = useMemo(
-    () => requirementRoleDraftFromRequirement(requirement, {
-      frontendUserId,
-      backendUserId,
-      testerUserId,
-    }),
-    [requirement, frontendUserId, backendUserId, testerUserId],
-  );
-
-  const devAssignExcludeUserIds = useMemo(() => {
-    if (!pickerSlot) return [];
-    return excludeUserIdsForDevAssignPicker(roleDraft, pickerSlot);
-  }, [pickerSlot, roleDraft]);
-
-  const handleConfirmDevAssignment = async () => {
-    if (!canManageAsProductOwner) {
-      setActionError(PRODUCT_OWNER_ONLY_HINT);
-      return;
-    }
-    if (!frontendMember || !backendMember || !testerMember) {
-      setActionError('请指定前端、后端与测试负责人');
-      return;
-    }
-    const roleError = validateUniqueRequirementRoles(roleDraft);
-    if (roleError) {
-      setActionError(roleError);
+  const handleCompleteDevDesign = async () => {
+    if (!isDevDesignPhase) return;
+    if (!canManageAsDeveloper) {
+      setActionError(DEVELOPER_ONLY_HINT);
       return;
     }
     setTransitioning(true);
     setActionError(null);
     try {
-      const frontendName = userDisplayName(frontendMember.user_name);
-      const backendName = userDisplayName(backendMember.user_name);
-      const testerName = userDisplayName(testerMember.user_name);
+      const doc = linkedDevDoc
+        ? `[WPS文档] ${linkedDevDoc.name}${linkedDevDoc.link_url ? ` ${linkedDevDoc.link_url}` : ''}`
+        : '研发方案已确认（未关联在线文档）';
       const updated = await api.transitionRequirement(requirement.id, 'DEVELOPMENT', {
-        review_result: 'APPROVED',
-        review_comment: `已分配前端负责人：${frontendName}，后端负责人：${backendName}，测试负责人：${testerName}。`,
-        reviewer_user_id: requirement.product_owner_user_id,
-        developer_user_id: frontendUserId,
-        backend_developer_user_id: backendUserId,
-        tester_user_id: testerUserId,
-        remark: '研发与测试人员分配完成，进入研发阶段。',
+        dev_design_doc: doc,
+        remark: '研发方案已确认，进入研发阶段。',
       });
       onRequirementUpdated(updated);
     } catch (err) {
@@ -516,30 +280,6 @@ export function RequirementDetailView({
     } finally {
       setTransitioning(false);
     }
-  };
-
-  const handlePickerSelect = (member: ProjectMember) => {
-    if (!canManageAsProductOwner) return;
-    if (pickerSlot === 'frontend') {
-      setFrontendUserId(member.user_id);
-    } else if (pickerSlot === 'backend') {
-      setBackendUserId(member.user_id);
-    } else if (pickerSlot === 'tester') {
-      setTesterUserId(member.user_id);
-    }
-    setActionError(null);
-  };
-
-  const assignMemberForSlot = (slot: DevAssignSlot) => {
-    if (slot === 'frontend') return frontendMember;
-    if (slot === 'backend') return backendMember;
-    return testerMember;
-  };
-
-  const assignSlotLabel = (slot: DevAssignSlot) => {
-    if (slot === 'frontend') return '前端';
-    if (slot === 'backend') return '后端';
-    return '测试';
   };
 
   return (
@@ -571,6 +311,13 @@ export function RequirementDetailView({
                 </span>
                 {isDevPhase ? <DevPhaseViewBadge viewContext={devPhaseView} /> : null}
                 {isTestPhase ? <TestPhaseViewBadge viewContext={testPhaseView} /> : null}
+                <button
+                  type="button"
+                  className="tsw-btn tsw-btnGhost tsw-reqViewEntryBtn"
+                  onClick={() => setViewDialogOpen(true)}
+                >
+                  查看需求
+                </button>
               </div>
             </div>
             <p className="tsw-reqDetailMeta tsw-muted">
@@ -591,7 +338,7 @@ export function RequirementDetailView({
           </header>
 
           <nav className="tsw-reqPhaseStepper" aria-label="需求阶段">
-            <p className="tsw-muted tsw-reqPhaseStepperHint">点击已完成或当前节点，可查看该阶段信息与历史记录。</p>
+            <p className="tsw-muted tsw-reqPhaseStepperHint">点击已完成或当前节点，可查看需求详情与历史记录。</p>
             <ol className="tsw-reqPhaseList">
               {REQUIREMENT_PHASE_STEPS.map((step, index) => {
                 const state = phaseStates[index] ?? 'upcoming';
@@ -617,14 +364,11 @@ export function RequirementDetailView({
                         <span className="tsw-reqPhaseLabel">{step.title}</span>
                       </button>
                     ) : (
-                      <>
+                      <span className="tsw-reqPhaseStatic">
                         <span className="tsw-reqPhaseIcon" aria-hidden="true">{index + 1}</span>
                         <span className="tsw-reqPhaseLabel">{step.title}</span>
-                      </>
+                      </span>
                     )}
-                    {index < REQUIREMENT_PHASE_STEPS.length - 1 ? (
-                      <span className="tsw-reqPhaseLine" aria-hidden="true" />
-                    ) : null}
                   </li>
                 );
               })}
@@ -634,7 +378,7 @@ export function RequirementDetailView({
           {!isViewingCurrentPhase ? (
             <div className="tsw-reqPhaseViewBanner">
               <span>
-                正在查看历史节点：<strong>{viewingStep.title}</strong>
+                正在查看需求详情：<strong>{viewingStep.title}</strong>
               </span>
               <button
                 type="button"
@@ -655,30 +399,6 @@ export function RequirementDetailView({
               loading={timelineLoading}
               error={timelineError}
             />
-          ) : null}
-
-          {isViewingCurrentPhase && isAssignPhase ? (
-            <section className="tsw-card tsw-reqDetailSection">
-              <h3 className="tsw-reqSectionTitle">研发人员分配</h3>
-              <p className="tsw-muted tsw-reqDevAssignHint">
-                {canManageAsProductOwner
-                  ? '请指定前端、后端与测试负责人，确认后将进入研发阶段。'
-                  : '研发人员分配由产品负责人决定，当前为只读查看。'}
-              </p>
-              <div className="tsw-reqDevAssignList">
-                {DEV_ASSIGN_SLOTS.map((config) => (
-                  <DevAssignRow
-                    key={config.slot}
-                    config={config}
-                    member={assignMemberForSlot(config.slot)}
-                    canEdit={canManageAsProductOwner}
-                    onChange={() => {
-                      if (canManageAsProductOwner) setPickerSlot(config.slot);
-                    }}
-                  />
-                ))}
-              </div>
-            </section>
           ) : null}
 
           {isViewingCurrentPhase && isDevPhase ? (
@@ -722,6 +442,7 @@ export function RequirementDetailView({
               currentUserId={currentUserId}
               onRequirementUpdated={onRequirementUpdated}
               onLockedFeature={setLockedFeature}
+              onOpenRequirement={onOpenRequirement}
             />
           ) : null}
 
@@ -734,133 +455,129 @@ export function RequirementDetailView({
             />
           ) : null}
 
-          {isViewingCurrentPhase && !isDevPhase && !isTestPhase && !isBugFixingPhase && !isBugFixWorkPhase && !isAcceptancePhase ? (
-          <>
+          {isViewingCurrentPhase && (isRegressionPhase || isClosedPhase) ? (
+            <RequirementRegressionPanel
+              requirement={requirement}
+              members={members}
+              currentUserId={currentUserId}
+              onRequirementUpdated={onRequirementUpdated}
+            />
+          ) : null}
+
+          {isViewingCurrentPhase && isProductPhase ? (
           <section className="tsw-card tsw-reqDetailSection">
             <div className="tsw-reqSectionHead">
-              <h3 className="tsw-reqSectionTitle">产品文档</h3>
-              {canManageAsProductOwner && (isProductPhase || isAssignPhase) ? (
-                <div className="tsw-reqSectionActions">
-                  <button
-                    type="button"
-                    className="tsw-btn"
-                    onClick={() => setLockedFeature('WPS 在线文档')}
-                  >
-                    关联在线文档
-                  </button>
-                  <button
-                    type="button"
-                    className="tsw-btn tsw-btnPrimary tsw-btnSolid"
-                    onClick={() => setLockedFeature('AI 生成需求文档')}
-                  >
-                    ✦ AI 生成文档
-                  </button>
-                </div>
-              ) : (isProductPhase || isAssignPhase) ? (
-                <span className="tsw-tag tsw-tagMuted" title={PRODUCT_OWNER_ONLY_HINT}>只读</span>
-              ) : null}
+              <h3 className="tsw-reqSectionTitle">产品方案文档</h3>
             </div>
-
-            {showDemoDocs ? (
-              <div className="tsw-reqDocTableWrap">
-                <table className="tsw-reqDocTable">
-                  <thead>
-                    <tr>
-                      <th>标题</th>
-                      <th>类型/状态</th>
-                      <th>创建人</th>
-                      <th>更新时间</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {demoDocuments.map((doc) => (
-                      <tr key={doc.id}>
-                        <td>
-                          <strong>{doc.title}</strong>
-                        </td>
-                        <td>
-                          <div className="tsw-reqDocTags">
-                            {doc.tags.map((tag) => (
-                              <span
-                                key={tag.label}
-                                className="tsw-reqDocTag"
-                                data-tone={tag.tone}
-                              >
-                                {tag.label}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td>{doc.creator}</td>
-                        <td className="tsw-muted">{doc.updatedAt}</td>
-                        <td>
-                          {canManageAsProductOwner ? (
-                            <button
-                              type="button"
-                              className="tsw-linkBtn"
-                              onClick={() => setLockedFeature('WPS 在线文档')}
-                            >
-                              查看编辑 →
-                            </button>
-                          ) : (
-                            <span className="tsw-muted">查看（只读）</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <p className="tsw-fieldHint">Demo 展示占位文档，WPS 在线文档能力暂未开放。</p>
+            <div className="tsw-reqDocEntryGrid">
+              <button
+                type="button"
+                className="tsw-reqDocEntryCard"
+                disabled={!canManageAsProductOwner}
+                title={canManageAsProductOwner ? undefined : PRODUCT_OWNER_ONLY_HINT}
+                onClick={() => {
+                  if (canManageAsProductOwner) setDocPickerTarget('product');
+                }}
+              >
+                <span className="tsw-reqDocEntryIcon" aria-hidden="true">📄</span>
+                <strong>在线文档</strong>
+                <span className="tsw-muted">从 WPS 云文档选择产品方案</span>
+              </button>
+              <button
+                type="button"
+                className="tsw-reqDocEntryCard"
+                title="暂未开放"
+                onClick={() => setLockedFeature('AI 生成文档')}
+              >
+                <span className="tsw-reqDocEntryIcon" aria-hidden="true">✦</span>
+                <strong>AI 生成文档</strong>
+                <span className="tsw-tag tsw-tagMuted">暂未开放</span>
+              </button>
+            </div>
+            {linkedProductDoc ? (
+              <div className="tsw-wpsDocCard" style={{ marginTop: 12 }}>
+                <span className="tsw-docUploadIcon tsw-docUploadIconWps" aria-hidden="true">📄</span>
+                <div className="tsw-wpsDocRowText">
+                  <strong>{linkedProductDoc.name}</strong>
+                  <span className="tsw-muted">{linkedProductDoc.type || '在线文档'}</span>
+                </div>
+                {wpsDocumentHref(linkedProductDoc) ? (
+                  <a className="tsw-linkBtn" href={wpsDocumentHref(linkedProductDoc)} target="_blank" rel="noreferrer">
+                    打开
+                  </a>
+                ) : null}
+                {canManageAsProductOwner ? (
+                  <button type="button" className="tsw-linkBtn" onClick={() => setLinkedProductDoc(null)}>
+                    移除
+                  </button>
+                ) : null}
               </div>
             ) : (
-              <p className="tsw-muted">暂无产品文档。</p>
+              <p className="tsw-fieldHint">在线文档为可选项，未关联也可完成并进入下一阶段。</p>
             )}
           </section>
+          ) : null}
 
+          {isViewingCurrentPhase && isDevDesignPhase ? (
           <section className="tsw-card tsw-reqDetailSection">
-            <h3 className="tsw-reqSectionTitle">关联资料</h3>
-            <div className="tsw-reqMaterialGrid">
-              {showDemoDocs ? DEMO_MATERIALS.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className="tsw-reqMaterialCard"
-                  disabled={!canManageAsProductOwner}
-                  title={canManageAsProductOwner ? undefined : PRODUCT_OWNER_ONLY_HINT}
-                  onClick={() => {
-                    if (canManageAsProductOwner) setLockedFeature('WPS 在线文档');
-                  }}
-                >
-                  <span className="tsw-reqMaterialIcon" aria-hidden="true">📄</span>
-                  <strong>{item.title}</strong>
-                  <span className="tsw-muted">{item.subtitle}</span>
-                </button>
-              )) : null}
-              {canManageAsProductOwner ? (
-                <button
-                  type="button"
-                  className="tsw-reqMaterialAdd"
-                  onClick={() => setLockedFeature('WPS 在线文档')}
-                >
-                  + 添加资料
-                </button>
-              ) : null}
+            <div className="tsw-reqSectionHead">
+              <h3 className="tsw-reqSectionTitle">研发方案文档</h3>
             </div>
+            <div className="tsw-reqDocEntryGrid">
+              <button
+                type="button"
+                className="tsw-reqDocEntryCard"
+                disabled={!canManageAsDeveloper}
+                title={canManageAsDeveloper ? undefined : DEVELOPER_ONLY_HINT}
+                onClick={() => {
+                  if (canManageAsDeveloper) setDocPickerTarget('dev');
+                }}
+              >
+                <span className="tsw-reqDocEntryIcon" aria-hidden="true">📄</span>
+                <strong>在线文档</strong>
+                <span className="tsw-muted">从 WPS 云文档选择研发方案</span>
+              </button>
+              <button
+                type="button"
+                className="tsw-reqDocEntryCard"
+                title="暂未开放"
+                onClick={() => setLockedFeature('AI 生成文档')}
+              >
+                <span className="tsw-reqDocEntryIcon" aria-hidden="true">✦</span>
+                <strong>AI 生成文档</strong>
+                <span className="tsw-tag tsw-tagMuted">暂未开放</span>
+              </button>
+            </div>
+            {linkedDevDoc ? (
+              <div className="tsw-wpsDocCard" style={{ marginTop: 12 }}>
+                <span className="tsw-docUploadIcon tsw-docUploadIconWps" aria-hidden="true">📄</span>
+                <div className="tsw-wpsDocRowText">
+                  <strong>{linkedDevDoc.name}</strong>
+                  <span className="tsw-muted">{linkedDevDoc.type || '在线文档'}</span>
+                </div>
+                {wpsDocumentHref(linkedDevDoc) ? (
+                  <a className="tsw-linkBtn" href={wpsDocumentHref(linkedDevDoc)} target="_blank" rel="noreferrer">
+                    打开
+                  </a>
+                ) : null}
+                {canManageAsDeveloper ? (
+                  <button type="button" className="tsw-linkBtn" onClick={() => setLinkedDevDoc(null)}>
+                    移除
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <p className="tsw-fieldHint">在线文档为可选项，未关联也可完成并进入下一阶段。</p>
+            )}
           </section>
-          </>
           ) : null}
         </div>
 
         <aside className="tsw-reqDetailAside">
-          {!isTestPhase ? (
-            <div className="tsw-card tsw-reqAsideCard">
-              <h4 className="tsw-reqAsideTitle">
-                {isAcceptancePhase ? '验收负责人' : '产品负责人'}
-              </h4>
-              <AsidePerson name={ownerName} roleLabel="产品负责人" />
-            </div>
-          ) : null}
+          <div className="tsw-card tsw-reqAsideCard">
+            <h4 className="tsw-reqAsideTitle">{phaseOwnerRoleLabel}</h4>
+            <AsidePerson name={phaseOwnerName} roleLabel={phaseOwnerRoleLabel} />
+          </div>
 
           {isViewingCurrentPhase && isDevPhase ? (
             <RequirementDevPhaseAside
@@ -891,7 +608,7 @@ export function RequirementDetailView({
               <h4 className="tsw-reqAsideTitle">产品阶段操作</h4>
               <p className="tsw-muted tsw-reqAsideHint">
                 {canManageAsProductOwner
-                  ? '产品文档确认后，可进入研发分配阶段。'
+                  ? '在线文档可选。确认后可直接进入研发方案设计。'
                   : PRODUCT_OWNER_ONLY_HINT}
               </p>
               {actionError ? <p className="tsw-error">{actionError}</p> : null}
@@ -907,29 +624,23 @@ export function RequirementDetailView({
             </div>
           ) : null}
 
-          {isViewingCurrentPhase && isAssignPhase ? (
+          {isViewingCurrentPhase && isDevDesignPhase ? (
             <div className="tsw-card tsw-reqAsideCard">
-              <h4 className="tsw-reqAsideTitle">研发阶段操作</h4>
+              <h4 className="tsw-reqAsideTitle">研发方案操作</h4>
               <p className="tsw-muted tsw-reqAsideHint">
-                {canManageAsProductOwner
-                  ? '请确认前端、后端与测试负责人均已指定，确认后将进入研发阶段。'
-                  : '研发分配由产品负责人确认，当前为只读查看。'}
+                {canManageAsDeveloper
+                  ? '在线文档可选。确认后可直接进入研发阶段。'
+                  : DEVELOPER_ONLY_HINT}
               </p>
               {actionError ? <p className="tsw-error">{actionError}</p> : null}
               <button
                 type="button"
                 className="tsw-btn tsw-btnPrimary tsw-btnSolid tsw-reqAsidePrimaryBtn"
-                disabled={
-                  transitioning
-                  || !frontendMember
-                  || !backendMember
-                  || !testerMember
-                  || !canManageAsProductOwner
-                }
-                title={canManageAsProductOwner ? undefined : PRODUCT_OWNER_ONLY_HINT}
-                onClick={() => void handleConfirmDevAssignment()}
+                disabled={transitioning || !canManageAsDeveloper}
+                title={canManageAsDeveloper ? undefined : DEVELOPER_ONLY_HINT}
+                onClick={() => void handleCompleteDevDesign()}
               >
-                {transitioning ? '处理中…' : '确认分配并进入研发'}
+                {transitioning ? '处理中…' : '完成研发方案'}
               </button>
             </div>
           ) : null}
@@ -955,20 +666,34 @@ export function RequirementDetailView({
         <FeatureLockedDialog label={lockedFeature} onClose={() => setLockedFeature(null)} />
       ) : null}
 
-      {pickerSlot ? (
-        <MemberPickerDialog
-          title={`选择${assignSlotLabel(pickerSlot)}负责人`}
-          members={members}
-          selectedUserId={
-            pickerSlot === 'frontend'
-              ? frontendUserId
-              : pickerSlot === 'backend'
-                ? backendUserId
-                : testerUserId
+      {docPickerTarget ? (
+        <WpsDocumentPickerDialog
+          title={docPickerTarget === 'dev' ? '选择研发方案文档' : '选择产品方案文档'}
+          subtitle={
+            docPickerTarget === 'dev'
+              ? '从当前账号可访问的云文档中选择研发方案。'
+              : '从当前账号可访问的云文档中选择产品方案。'
           }
-          excludeUserIds={devAssignExcludeUserIds}
-          onClose={() => setPickerSlot(null)}
-          onSelect={handlePickerSelect}
+          onClose={() => setDocPickerTarget(null)}
+          onConfirm={async (doc) => {
+            if (docPickerTarget === 'dev') {
+              setLinkedDevDoc(doc);
+            } else {
+              setLinkedProductDoc(doc);
+            }
+          }}
+        />
+      ) : null}
+
+      {viewDialogOpen ? (
+        <RequirementViewDialog
+          requirement={requirement}
+          members={members}
+          currentUserId={currentUserId}
+          onClose={() => setViewDialogOpen(false)}
+          onUpdated={(updated) => {
+            onRequirementUpdated(updated);
+          }}
         />
       ) : null}
     </div>

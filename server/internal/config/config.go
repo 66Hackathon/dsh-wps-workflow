@@ -39,6 +39,7 @@ type WPSOAuthConfig struct {
 	AuthURL          string
 	TokenURL         string
 	UserURL          string
+	APIBaseURL       string
 	SignatureEnabled bool
 	RefreshLeadSec   int
 }
@@ -78,10 +79,11 @@ func Load() (Config, error) {
 			ClientID:         envString("WPS_OAUTH_CLIENT_ID", ""),
 			ClientSecret:     envString("WPS_OAUTH_CLIENT_SECRET", ""),
 			RedirectURI:      envString("WPS_OAUTH_REDIRECT_URI", ""),
-			Scope:            envString("WPS_OAUTH_SCOPE", "kso.user_base.read"),
+			Scope:            envString("WPS_OAUTH_SCOPE", "kso.user_base.read kso.file.search"),
 			AuthURL:          envString("WPS_OAUTH_AUTH_URL", "https://openapi.wps.cn/oauth2/auth"),
 			TokenURL:         envString("WPS_OAUTH_TOKEN_URL", "https://openapi.wps.cn/oauth2/token"),
 			UserURL:          envString("WPS_OAUTH_USER_URL", "https://openapi.wps.cn/v7/users/current"),
+			APIBaseURL:       envString("WPS_API_BASE_URL", "https://openapi.wps.cn"),
 			SignatureEnabled: envBool("WPS_OAUTH_SIGNATURE_ENABLED", true),
 			RefreshLeadSec:   envIntDefault("WPS_OAUTH_REFRESH_LEAD_SEC", 300),
 		},

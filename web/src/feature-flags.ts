@@ -1,16 +1,16 @@
 /** 第一版功能开关：入口保留，点击后提示暂未开放（设计文档 §八）。 */
 export const featureFlags = {
   aiGenerate: false,
-  groupChat: false,
+  groupChat: true,
   robot: false,
-  onlineDocument: false,
+  onlineDocument: true,
   gitlab: false,
   notification: false,
   documentVersion: false,
   aiContext: false,
   aiBugAnalysis: false,
   dshIntegration: false,
-  wpsDocument: false,
+  wpsDocument: true,
   streamOutput: false,
 } as const;
 

@@ -165,11 +165,9 @@ export function CreateRequirementInfoStep({ draft, onChange, onCancel, onNext }:
             <strong>填写说明</strong>
           </div>
           <ul className="tsw-createAsideList">
-            <li>创建后需求将进入「产品编辑中」状态</li>
+            <li>创建者即为产品负责人</li>
             <li>本步骤仅填写基础信息</li>
-            <li>下一步选择产品负责人</li>
-            <li>产品设计完成后将指定前后端负责人</li>
-            <li>负责人指定后状态流转至研发阶段</li>
+            <li>下一步指定研发与测试负责人，可与产品为同一人</li>
           </ul>
         </div>
       </aside>

@@ -60,12 +60,11 @@ func (h *ProjectHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	projectID, err := h.repo.CreateProject(r.Context(), repository.CreateProjectInput{
-		OrganizationID: record.User.OrganizationID,
-		ProjectCode:    body.ProjectCode,
-		Name:           body.Name,
-		Description:    body.Description,
-		OwnerUserID:    record.User.ID,
-		CreatedBy:      record.User.ID,
+		ProjectCode: body.ProjectCode,
+		Name:        body.Name,
+		Description: body.Description,
+		OwnerUserID: record.User.ID,
+		CreatedBy:   record.User.ID,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create_failed", "message": err.Error()})
@@ -302,12 +301,10 @@ func (h *ProjectHandler) handleUpdateSetup(w http.ResponseWriter, r *http.Reques
 	}
 
 	var body struct {
-		Name             *string `json:"name"`
-		Description      *string `json:"description"`
-		GitRepoURL       *string `json:"git_repo_url"`
-		GitDefaultBranch *string `json:"git_default_branch"`
-		WPSGroupID       *string `json:"wps_group_id"`
-		WPSGroupName     *string `json:"wps_group_name"`
+		Name         *string `json:"name"`
+		Description  *string `json:"description"`
+		WPSGroupID   *string `json:"wps_group_id"`
+		WPSGroupName *string `json:"wps_group_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
@@ -315,12 +312,10 @@ func (h *ProjectHandler) handleUpdateSetup(w http.ResponseWriter, r *http.Reques
 	}
 
 	project, err := h.repo.UpdateProjectSetup(r.Context(), projectID, repository.UpdateProjectSetupInput{
-		Name:             body.Name,
-		Description:      body.Description,
-		GitRepoURL:       body.GitRepoURL,
-		GitDefaultBranch: body.GitDefaultBranch,
-		WPSGroupID:       body.WPSGroupID,
-		WPSGroupName:     body.WPSGroupName,
+		Name:         body.Name,
+		Description:  body.Description,
+		WPSGroupID:   body.WPSGroupID,
+		WPSGroupName: body.WPSGroupName,
 	})
 	if err != nil {
 		msg := err.Error()
@@ -351,6 +346,200 @@ func (h *ProjectHandler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.repo.DeleteProject(r.Context(), projectID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delete_failed", "message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (h *ProjectHandler) handleListRepositories(w http.ResponseWriter, r *http.Request) {
+	projectID, err := parsePathUint64(r, "id")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		return
+	}
+	items, err := h.repo.ListProjectRepositories(r.Context(), projectID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list_failed", "message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *ProjectHandler) handleCreateRepository(w http.ResponseWriter, r *http.Request) {
+	record, ok := sessionFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	projectID, err := parsePathUint64(r, "id")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		return
+	}
+	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
+		writeForbidden(w, err)
+		return
+	}
+
+	var body struct {
+		RepoName      string `json:"repo_name"`
+		RepoURL       string `json:"repo_url"`
+		DefaultBranch string `json:"default_branch"`
+		DevDirection  string `json:"dev_direction"`
+		SortOrder     uint32 `json:"sort_order"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+		return
+	}
+
+	item, err := h.repo.CreateProjectRepository(r.Context(), repository.CreateProjectRepositoryInput{
+		ProjectID:     projectID,
+		RepoName:      body.RepoName,
+		RepoURL:       body.RepoURL,
+		DefaultBranch: body.DefaultBranch,
+		DevDirection:  body.DevDirection,
+		SortOrder:     body.SortOrder,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "create_failed", "message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (h *ProjectHandler) handleReplaceRepositories(w http.ResponseWriter, r *http.Request) {
+	record, ok := sessionFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	projectID, err := parsePathUint64(r, "id")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		return
+	}
+	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
+		writeForbidden(w, err)
+		return
+	}
+
+	var body struct {
+		Items []struct {
+			RepoName      string `json:"repo_name"`
+			RepoURL       string `json:"repo_url"`
+			DefaultBranch string `json:"default_branch"`
+			DevDirection  string `json:"dev_direction"`
+			SortOrder     uint32 `json:"sort_order"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+		return
+	}
+
+	inputs := make([]repository.CreateProjectRepositoryInput, 0, len(body.Items))
+	for i, item := range body.Items {
+		sortOrder := item.SortOrder
+		if sortOrder == 0 {
+			sortOrder = uint32(i + 1)
+		}
+		inputs = append(inputs, repository.CreateProjectRepositoryInput{
+			ProjectID:     projectID,
+			RepoName:      item.RepoName,
+			RepoURL:       item.RepoURL,
+			DefaultBranch: item.DefaultBranch,
+			DevDirection:  item.DevDirection,
+			SortOrder:     sortOrder,
+		})
+	}
+
+	items, err := h.repo.ReplaceProjectRepositories(r.Context(), projectID, inputs)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "replace_failed", "message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *ProjectHandler) handleUpdateRepository(w http.ResponseWriter, r *http.Request) {
+	record, ok := sessionFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	projectID, err := parsePathUint64(r, "id")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		return
+	}
+	repoID, err := parsePathUint64(r, "repoId")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_repo_id"})
+		return
+	}
+	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
+		writeForbidden(w, err)
+		return
+	}
+
+	var body struct {
+		RepoName      *string `json:"repo_name"`
+		RepoURL       *string `json:"repo_url"`
+		DefaultBranch *string `json:"default_branch"`
+		DevDirection  *string `json:"dev_direction"`
+		SortOrder     *uint32 `json:"sort_order"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+		return
+	}
+
+	item, err := h.repo.UpdateProjectRepository(r.Context(), projectID, repoID, repository.UpdateProjectRepositoryInput{
+		RepoName:      body.RepoName,
+		RepoURL:       body.RepoURL,
+		DefaultBranch: body.DefaultBranch,
+		DevDirection:  body.DevDirection,
+		SortOrder:     body.SortOrder,
+	})
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]string{"error": "update_failed", "message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *ProjectHandler) handleDeleteRepository(w http.ResponseWriter, r *http.Request) {
+	record, ok := sessionFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	projectID, err := parsePathUint64(r, "id")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		return
+	}
+	repoID, err := parsePathUint64(r, "repoId")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_repo_id"})
+		return
+	}
+	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
+		writeForbidden(w, err)
+		return
+	}
+
+	if err := h.repo.DeleteProjectRepository(r.Context(), projectID, repoID); err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]string{"error": "delete_failed", "message": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})

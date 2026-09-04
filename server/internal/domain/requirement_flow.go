@@ -5,43 +5,59 @@ import (
 	"strings"
 )
 
-// Requirement statuses (state machine nodes).
+// ── 工作项类型 ────────────────────────────────────────────────────────────────
+
 const (
-	StatusProductEditing = "PRODUCT_EDITING"
-	StatusProductReview  = "PRODUCT_REVIEW"
-	StatusDevelopment    = "DEVELOPMENT"
-	StatusTesting        = "TESTING"
-	StatusBugFixing      = "BUG_FIXING"
-	StatusDone           = "DONE"
-	StatusArchived       = "ARCHIVED"
+	ItemTypeRequirement = "REQUIREMENT"
+	ItemTypeBug         = "BUG"
 )
 
-// Development scopes.
+// ── 状态机节点 ────────────────────────────────────────────────────────────────
+//
+// 普通需求（REQUIREMENT）完整路径：
+//
+//	CREATED → PRODUCT_DESIGN → DEV_DESIGN → DEVELOPMENT → TESTING
+//	→ PRODUCT_ACCEPTANCE → REGRESSION → CLOSED
+//	测试不通过（FAIL）退回：→ DEVELOPMENT（可再次开发后进入测试）
+//	测试提交 Bug：新建 BUG 子需求，主需求仍停留在 TESTING（不回滚）
+//	产品验收失败退回：→ DEVELOPMENT
+//	回归失败：记录结果后仍可关闭；后续可将 FAIL 改为 PASS
+//
+// Bug 子项（BUG）路径（独立流转，不回滚主需求）：
+//
+//	DEVELOPMENT → TESTING → PRODUCT_ACCEPTANCE → CLOSED
+//	测试/验收失败退回：→ DEVELOPMENT
 const (
-	ScopeFunctional = "FUNCTIONAL"
-	ScopeBugFix     = "BUG_FIX"
+	StatusCreated           = "CREATED"
+	StatusProductDesign     = "PRODUCT_DESIGN"
+	StatusDevDesign         = "DEV_DESIGN"
+	StatusDevelopment       = "DEVELOPMENT"
+	StatusTesting           = "TESTING"
+	StatusProductAcceptance = "PRODUCT_ACCEPTANCE"
+	StatusRegression        = "REGRESSION"
+	StatusClosed            = "CLOSED"
 )
 
-// Stage codes (exit gates — submission must be filled before leaving the stage).
+// ── 阶段码（对应 requirement_stage_submissions.stage_code）──────────────────
+
 const (
-	StageProductEditing      = "PRODUCT_EDITING"
-	StageProductReview       = "PRODUCT_REVIEW"
-	StageDevelopment         = "DEVELOPMENT"
-	StageDevelopmentFrontend = "DEVELOPMENT_FRONTEND"
-	StageDevelopmentBackend  = "DEVELOPMENT_BACKEND"
-	StageTesting             = "TESTING"
-	StageBugFixing           = "BUG_FIXING"
-	StageDone                = "DONE"
+	StageProductDesign     = "PRODUCT_DESIGN"
+	StageDevDesign         = "DEV_DESIGN"
+	StageDevelopment       = "DEVELOPMENT"
+	StageTesting           = "TESTING"
+	StageProductAcceptance = "PRODUCT_ACCEPTANCE"
+	StageRegression        = "REGRESSION"
 )
 
-// Review / test result enums.
+// ── 测试 / 验收结果 ──────────────────────────────────────────────────────────
+
 const (
-	ReviewApproved = "APPROVED"
-	ReviewRejected = "REJECTED"
-	TestPass       = "PASS"
-	TestFail       = "FAIL"
-	TestBlocked    = "BLOCKED"
+	ResultPass      = "PASS"
+	ResultFail      = "FAIL"
+	ResultSubmitBug = "SUBMIT_BUG" // 仅用于创建 Bug 子需求语义，不触发主需求回滚
 )
+
+// ── 转换规则 ─────────────────────────────────────────────────────────────────
 
 // TransitionRule defines a valid status change and required stage submission.
 type TransitionRule struct {
@@ -51,185 +67,148 @@ type TransitionRule struct {
 	Description       string
 }
 
-// RequirementTransitionRules is the authoritative requirement state machine.
+// RequirementTransitionRules：普通需求流转规则
 var RequirementTransitionRules = []TransitionRule{
-	{StatusProductEditing, StatusProductReview, StageProductEditing, "产品提交评审：须填写需求规格与验收标准"},
-	{StatusProductReview, StatusDevelopment, StageProductReview, "评审通过：须填写评审结论（通过）"},
-	{StatusProductReview, StatusProductEditing, StageProductReview, "评审驳回：须填写评审结论（驳回）"},
-	{StatusDevelopment, StatusTesting, StageDevelopment, "研发完成：须填写实现说明与负责人"},
-	{StatusDevelopment, StatusDone, StageDevelopment, "缺陷修复完成：Bug 修复需求直接完成"},
-	{StatusTesting, StatusDone, StageTesting, "测试通过：须填写测试报告（通过）"},
-	{StatusTesting, StatusBugFixing, StageTesting, "测试失败：创建缺陷并进入 Bug 修复"},
-	{StatusBugFixing, StatusTesting, StageBugFixing, "缺陷修复确认：返回测试复验"},
-	{StatusTesting, StatusDevelopment, StageTesting, "测试失败：须填写测试报告（失败）并退回研发"},
-	{StatusDone, StatusArchived, StageDone, "产品验收通过：须填写验收说明并归档"},
-	{StatusDone, StatusDevelopment, StageDone, "产品验收失败：须填写失败原因并退回研发"},
+	// 创建后进入产品方案设计（无需提交材料，仅角色校验）
+	{StatusCreated, StatusProductDesign, StageProductDesign, "开始产品方案设计"},
+	// 产品设计完成 → 研发方案设计
+	{StatusProductDesign, StatusDevDesign, StageProductDesign, "产品方案完成：须填写方案正文与验收标准"},
+	// 研发方案完成 → 研发中
+	{StatusDevDesign, StatusDevelopment, StageDevDesign, "研发方案完成：须填写方案文档"},
+	// 研发完成 → 测试
+	{StatusDevelopment, StatusTesting, StageDevelopment, "研发完成：须填写研发说明"},
+	// 测试通过 → 产品验收
+	{StatusTesting, StatusProductAcceptance, StageTesting, "测试通过：须提交测试结果（PASS）"},
+	// 测试不通过 → 退回研发（可再次开发后进入测试）
+	{StatusTesting, StatusDevelopment, StageTesting, "测试不通过：须提交测试结果（FAIL）并填写退回原因"},
+	// 注意：提交 Bug 不在此流转——应新建 BUG 子需求，主需求保持 TESTING
+	// 产品验收通过 → 回归测试
+	{StatusProductAcceptance, StatusRegression, StageProductAcceptance, "产品验收通过：须填写验收说明（PASS）"},
+	// 产品验收失败 → 退回研发
+	{StatusProductAcceptance, StatusDevelopment, StageProductAcceptance, "产品验收失败：须填写失败原因（FAIL）"},
+	// 回归完成 → 关闭（无论成功/失败，均记录结果后关闭；失败后可手动改为成功）
+	{StatusRegression, StatusClosed, StageRegression, "回归完成：须填写回归结果"},
 }
 
-// StageSubmissionInput is the payload submitted when exiting a stage.
-type StageSubmissionInput struct {
-	SpecBody               string
-	AcceptanceCriteria     string
-	ProductOwnerUserID     uint64
-	ReviewResult           string
-	ReviewComment          string
-	ReviewerUserID         uint64
-	DevSummary             string
-	DeveloperUserID        uint64
-	BackendDeveloperUserID uint64
-	ImplementationNotes    string
-	TestSummary            string
-	TestResult             string
-	TesterUserID           uint64
-	TestCasesCovered       string
-	ReleaseNote            string
-	ClosedByUserID         uint64
-	Remark                 string
+// BugTransitionRules：Bug 子项流转规则（无产品设计 / 研发方案阶段）
+var BugTransitionRules = []TransitionRule{
+	{StatusDevelopment, StatusTesting, StageDevelopment, "Bug 研发完成：须填写修复说明"},
+	{StatusTesting, StatusProductAcceptance, StageTesting, "Bug 测试通过：须提交测试结果（PASS）"},
+	{StatusTesting, StatusDevelopment, StageTesting, "Bug 测试不通过：须退回研发并填写原因"},
+	{StatusProductAcceptance, StatusClosed, StageProductAcceptance, "Bug 产品验收通过：关闭 Bug"},
+	{StatusProductAcceptance, StatusDevelopment, StageProductAcceptance, "Bug 产品验收失败：退回研发"},
 }
 
-// FindTransitionRule returns the rule for from→to or nil.
-func FindTransitionRule(fromStatus, toStatus string) *TransitionRule {
-	for i := range RequirementTransitionRules {
-		rule := &RequirementTransitionRules[i]
-		if rule.FromStatus == fromStatus && rule.ToStatus == toStatus {
-			return rule
+// FindTransitionRule 在对应规则集中查找 from→to 规则（first match）。
+func FindTransitionRule(itemType, fromStatus, toStatus string) *TransitionRule {
+	rules := RequirementTransitionRules
+	if itemType == ItemTypeBug {
+		rules = BugTransitionRules
+	}
+	for i := range rules {
+		r := &rules[i]
+		if r.FromStatus == fromStatus && r.ToStatus == toStatus {
+			return r
 		}
 	}
 	return nil
 }
 
-// ValidateTransitionOperator ensures stage transitions are performed by the
-// assigned role (product owner for product stages, developers for development,
-// tester for testing).
+// ── 阶段提交 Payload ──────────────────────────────────────────────────────────
+
+// StageSubmissionInput is the payload submitted when exiting a stage.
+type StageSubmissionInput struct {
+	// PRODUCT_DESIGN
+	SpecBody           string
+	AcceptanceCriteria string
+
+	// DEV_DESIGN
+	DevDesignDoc string
+
+	// DEVELOPMENT
+	DevSummary          string
+	ImplementationNotes string
+	DeveloperUserID     uint64
+
+	// TESTING / PRODUCT_ACCEPTANCE 退回时的原因
+	ReturnReason string
+
+	// TESTING
+	TestResult       string // PASS / FAIL / SUBMIT_BUG
+	TestSummary      string
+	TestCasesCovered string
+	TesterUserID     uint64
+
+	// PRODUCT_ACCEPTANCE
+	AcceptanceNote string
+	AcceptResult   string // PASS / FAIL
+
+	// REGRESSION
+	RegressionResult  string // PASS / FAIL
+	RegressionSummary string
+
+	// 通用
+	Remark string
+}
+
+// ── 角色校验 ──────────────────────────────────────────────────────────────────
+
+// ValidateTransitionOperator ensures stage transitions are performed by the correct role.
+// createdBy is the product owner (requirement creator).
+// developerUserID is the frontend/primary developer; backendDeveloperUserID is the backend developer.
 func ValidateTransitionOperator(
 	operatorID uint64,
-	productOwnerUserID uint64,
-	frontendDeveloperUserID uint64,
+	createdBy uint64,
+	developerUserID uint64,
 	backendDeveloperUserID uint64,
 	testerUserID uint64,
 	stageCode string,
-	sub StageSubmissionInput,
 ) error {
 	switch stageCode {
-	case StageProductEditing, StageProductReview:
-		if productOwnerUserID == 0 {
-			return fmt.Errorf("requirement has no product owner assigned")
+	case StageProductDesign, StageProductAcceptance:
+		// 产品方案 / 验收：仅创建者（产品）可操作
+		if createdBy == 0 {
+			return fmt.Errorf("requirement has no creator (product owner) assigned")
 		}
-		if operatorID != productOwnerUserID {
-			return fmt.Errorf("only the product owner can perform this action")
+		if operatorID != createdBy {
+			return fmt.Errorf("only the product owner (creator) can perform this action")
 		}
-		if stageCode == StageProductReview {
-			if sub.ReviewerUserID == 0 {
-				return fmt.Errorf("reviewer_user_id is required")
-			}
-			if sub.ReviewerUserID != productOwnerUserID {
-				return fmt.Errorf("reviewer must be the product owner")
-			}
-		}
-	case StageDevelopment:
-		if frontendDeveloperUserID == 0 && backendDeveloperUserID == 0 {
+	case StageDevDesign, StageDevelopment:
+		// 研发方案 / 开发：前端或后端负责人可操作
+		if developerUserID == 0 && backendDeveloperUserID == 0 {
 			return fmt.Errorf("requirement has no developer assigned")
 		}
-		if operatorID != frontendDeveloperUserID && operatorID != backendDeveloperUserID {
-			return fmt.Errorf("only the assigned developers can complete development")
+		if operatorID != developerUserID && operatorID != backendDeveloperUserID {
+			return fmt.Errorf("only the assigned developer can perform this action")
 		}
-	case StageTesting, StageBugFixing:
+	case StageTesting:
+		// 测试：仅测试人员可操作
 		if testerUserID == 0 {
 			return fmt.Errorf("requirement has no tester assigned")
 		}
 		if operatorID != testerUserID {
-			return fmt.Errorf("only the assigned tester can complete testing")
+			return fmt.Errorf("only the assigned tester can perform this action")
 		}
-	case StageDone:
-		if productOwnerUserID == 0 {
-			return fmt.Errorf("requirement has no product owner assigned")
-		}
-		if operatorID != productOwnerUserID {
-			return fmt.Errorf("only the product owner can perform acceptance")
+	case StageRegression:
+		// 回归结果可由测试人员或产品验收人（创建者）提交
+		if operatorID != createdBy && operatorID != testerUserID {
+			return fmt.Errorf("only the product owner or tester can submit regression result")
 		}
 	}
 	return nil
 }
 
-// ValidateUniqueRequirementRoles ensures each user holds at most one functional role on a requirement.
-func ValidateUniqueRequirementRoles(
-	productOwnerUserID uint64,
-	frontendDeveloperUserID uint64,
-	backendDeveloperUserID uint64,
-	testerUserID uint64,
-) error {
-	type rolePair struct {
-		label  string
-		userID uint64
-	}
-	roles := []rolePair{
-		{"product owner", productOwnerUserID},
-		{"frontend developer", frontendDeveloperUserID},
-		{"backend developer", backendDeveloperUserID},
-		{"tester", testerUserID},
-	}
-	seen := make(map[uint64]string)
-	for _, role := range roles {
-		if role.userID == 0 {
-			continue
-		}
-		if prev, ok := seen[role.userID]; ok {
-			return fmt.Errorf("user %d cannot hold multiple roles (%s and %s)", role.userID, prev, role.label)
-		}
-		seen[role.userID] = role.label
-	}
-	return nil
-}
+// ── 阶段提交字段校验 ──────────────────────────────────────────────────────────
 
-// ValidateStageSubmission ensures all required fields for the stage are filled with real values.
+// ValidateStageSubmission ensures all required fields for the stage are filled.
 func ValidateStageSubmission(stageCode string, sub StageSubmissionInput, toStatus string) error {
 	switch stageCode {
-	case StageProductEditing:
-		if strings.TrimSpace(sub.SpecBody) == "" {
-			return fmt.Errorf("spec_body is required")
-		}
-		if strings.TrimSpace(sub.AcceptanceCriteria) == "" {
-			return fmt.Errorf("acceptance_criteria is required")
-		}
-		if sub.ProductOwnerUserID == 0 {
-			return fmt.Errorf("product_owner_user_id is required")
-		}
-	case StageProductReview:
-		result := strings.ToUpper(strings.TrimSpace(sub.ReviewResult))
-		if result != ReviewApproved && result != ReviewRejected {
-			return fmt.Errorf("review_result must be APPROVED or REJECTED")
-		}
-		if strings.TrimSpace(sub.ReviewComment) == "" {
-			return fmt.Errorf("review_comment is required")
-		}
-		if sub.ReviewerUserID == 0 {
-			return fmt.Errorf("reviewer_user_id is required")
-		}
-		if toStatus == StatusDevelopment && result != ReviewApproved {
-			return fmt.Errorf("transition to DEVELOPMENT requires review_result APPROVED")
-		}
-		if toStatus == StatusProductEditing && result != ReviewRejected {
-			return fmt.Errorf("transition to PRODUCT_EDITING requires review_result REJECTED")
-		}
-		if toStatus == StatusDevelopment {
-			if sub.DeveloperUserID == 0 {
-				return fmt.Errorf("developer_user_id is required")
-			}
-			if sub.BackendDeveloperUserID == 0 {
-				return fmt.Errorf("backend_developer_user_id is required")
-			}
-			if sub.TesterUserID == 0 {
-				return fmt.Errorf("tester_user_id is required")
-			}
-			if err := ValidateUniqueRequirementRoles(
-				sub.ReviewerUserID,
-				sub.DeveloperUserID,
-				sub.BackendDeveloperUserID,
-				sub.TesterUserID,
-			); err != nil {
-				return err
-			}
-		}
+	case StageProductDesign:
+		// 产品方案文档为可选项，允许空提交进入 DEV_DESIGN
+
+	case StageDevDesign:
+		// 研发方案文档为可选项，允许空提交进入 DEVELOPMENT
+
 	case StageDevelopment:
 		if strings.TrimSpace(sub.DevSummary) == "" {
 			return fmt.Errorf("dev_summary is required")
@@ -240,58 +219,87 @@ func ValidateStageSubmission(stageCode string, sub StageSubmissionInput, toStatu
 		if sub.DeveloperUserID == 0 {
 			return fmt.Errorf("developer_user_id is required")
 		}
+
 	case StageTesting:
 		result := strings.ToUpper(strings.TrimSpace(sub.TestResult))
-		if result != TestPass && result != TestFail && result != TestBlocked {
-			return fmt.Errorf("test_result must be PASS, FAIL or BLOCKED")
+		if result != ResultPass && result != ResultFail {
+			return fmt.Errorf("test_result must be PASS or FAIL")
 		}
 		if strings.TrimSpace(sub.TestSummary) == "" {
 			return fmt.Errorf("test_summary is required")
 		}
-		if strings.TrimSpace(sub.TestCasesCovered) == "" {
-			return fmt.Errorf("test_cases_covered is required")
-		}
 		if sub.TesterUserID == 0 {
 			return fmt.Errorf("tester_user_id is required")
 		}
-		if toStatus == StatusDone && result != TestPass {
-			return fmt.Errorf("transition to DONE requires test_result PASS")
+		// 退回研发时需要填写原因
+		if result == ResultFail && strings.TrimSpace(sub.ReturnReason) == "" {
+			return fmt.Errorf("return_reason is required when test_result is FAIL")
 		}
-		if toStatus == StatusDevelopment && result != TestFail {
+		// 校验目标状态与测试结果一致
+		if toStatus == StatusProductAcceptance && result != ResultPass {
+			return fmt.Errorf("transition to PRODUCT_ACCEPTANCE requires test_result PASS")
+		}
+		if toStatus == StatusDevelopment && result != ResultFail {
 			return fmt.Errorf("transition to DEVELOPMENT requires test_result FAIL")
 		}
-		if toStatus == StatusBugFixing && result != TestFail {
-			return fmt.Errorf("transition to BUG_FIXING requires test_result FAIL")
+
+	case StageProductAcceptance:
+		result := strings.ToUpper(strings.TrimSpace(sub.AcceptResult))
+		if result != ResultPass && result != ResultFail {
+			return fmt.Errorf("accept_result must be PASS or FAIL")
 		}
-	case StageBugFixing:
-		// Tester confirms all linked bug fixes; remark is optional.
-		return nil
-	case StageDone:
-		result := strings.ToUpper(strings.TrimSpace(sub.ReviewResult))
-		if result != ReviewApproved && result != ReviewRejected {
-			return fmt.Errorf("review_result must be APPROVED or REJECTED for product acceptance")
+		if toStatus == StatusRegression && result != ResultPass {
+			return fmt.Errorf("transition to REGRESSION requires accept_result PASS")
 		}
-		if strings.TrimSpace(sub.ReviewComment) == "" {
-			return fmt.Errorf("review_comment is required")
+		if toStatus == StatusDevelopment && result != ResultFail {
+			return fmt.Errorf("transition to DEVELOPMENT requires accept_result FAIL")
 		}
-		if toStatus == StatusArchived {
-			if result != ReviewApproved {
-				return fmt.Errorf("transition to ARCHIVED requires review_result APPROVED")
-			}
-			if strings.TrimSpace(sub.ReleaseNote) == "" {
-				return fmt.Errorf("release_note is required")
-			}
-			if sub.ClosedByUserID == 0 {
-				return fmt.Errorf("closed_by_user_id is required")
-			}
+		// Bug 子项验收通过 → CLOSED
+		if toStatus == StatusClosed && result != ResultPass {
+			return fmt.Errorf("transition to CLOSED requires accept_result PASS")
 		}
-		if toStatus == StatusDevelopment {
-			if result != ReviewRejected {
-				return fmt.Errorf("transition to DEVELOPMENT requires review_result REJECTED")
-			}
+		if result == ResultFail && strings.TrimSpace(sub.ReturnReason) == "" {
+			return fmt.Errorf("return_reason is required when accept_result is FAIL")
 		}
+
+	case StageRegression:
+		result := strings.ToUpper(strings.TrimSpace(sub.RegressionResult))
+		if result != ResultPass && result != ResultFail {
+			return fmt.Errorf("regression_result must be PASS or FAIL")
+		}
+		if strings.TrimSpace(sub.RegressionSummary) == "" {
+			return fmt.Errorf("regression_summary is required")
+		}
+
 	default:
-		return fmt.Errorf("unknown stage_code %s", stageCode)
+		return fmt.Errorf("unknown stage_code: %s", stageCode)
 	}
 	return nil
+}
+
+// ── Bug 子项前置校验 ──────────────────────────────────────────────────────────
+
+// ErrOpenBugItems is returned when a requirement has unclosed bug sub-items.
+type ErrOpenBugItems struct {
+	Count int
+}
+
+func (e ErrOpenBugItems) Error() string {
+	return fmt.Sprintf("requirement has %d open bug sub-item(s); close all bugs before continuing", e.Count)
+}
+
+// CheckAllBugsClosed returns ErrOpenBugItems if any bug sub-items are not CLOSED.
+// openCount should be provided by the repository layer.
+func CheckAllBugsClosed(openCount int) error {
+	if openCount > 0 {
+		return ErrOpenBugItems{Count: openCount}
+	}
+	return nil
+}
+
+// StagesRequiringBugCheck lists the stages where all bug sub-items must be CLOSED
+// before the main requirement can proceed.
+var StagesRequiringBugCheck = map[string]bool{
+	StageTesting:           true, // 测试通过 → 产品验收
+	StageProductAcceptance: true, // 验收通过 → 回归
 }

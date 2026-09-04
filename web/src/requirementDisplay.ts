@@ -7,7 +7,7 @@ export type RequirementKindFilter = 'all' | 'requirement' | 'bug';
 export const REQUIREMENT_LIFECYCLE_FILTERS: { key: RequirementLifecycleFilter; label: string }[] = [
   { key: 'all', label: '全部' },
   { key: 'active', label: '进行中' },
-  { key: 'archived', label: '已归档' },
+  { key: 'archived', label: '已结束' },
 ];
 
 export const REQUIREMENT_KIND_FILTERS: { key: RequirementKindFilter; label: string }[] = [
@@ -17,11 +17,13 @@ export const REQUIREMENT_KIND_FILTERS: { key: RequirementKindFilter; label: stri
 ];
 
 export function isBugFixRequirement(req: Requirement): boolean {
-  return req.development_scope === 'BUG_FIX';
+  return req.item_type === 'BUG' || req.development_scope === 'BUG_FIX';
 }
 
+/** 已结束：关闭或历史归档状态 */
 export function isArchivedRequirement(req: Requirement): boolean {
-  return req.current_status.toUpperCase() === 'ARCHIVED';
+  const status = req.current_status.toUpperCase();
+  return status === 'CLOSED' || status === 'ARCHIVED';
 }
 
 export function matchesRequirementLifecycle(
@@ -41,6 +43,7 @@ export function matchesRequirementKind(req: Requirement, filter: RequirementKind
 
 export function requirementOwnerIds(req: Requirement): number[] {
   return [
+    req.created_by,
     req.product_owner_user_id,
     req.developer_user_id,
     req.backend_developer_user_id,
@@ -88,10 +91,13 @@ export function requirementStatusTone(status: string): 'blue' | 'orange' | 'cyan
     case 'TESTING':
       return 'cyan';
     case 'DONE':
+    case 'PRODUCT_ACCEPTANCE':
       return 'green';
+    case 'CLOSED':
     case 'ARCHIVED':
       return 'gray';
     case 'PRODUCT_REVIEW':
+    case 'REGRESSION':
       return 'purple';
     default:
       return 'orange';

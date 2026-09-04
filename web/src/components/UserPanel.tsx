@@ -285,12 +285,6 @@ export function UserProfileDialog({ user, projectRole, onClose, onLogout }: User
                 <dd>{user.company_name}</dd>
               </div>
             ) : null}
-            {user.organization_id ? (
-              <div className="tsw-profileDialogField">
-                <dt>组织</dt>
-                <dd>#{user.organization_id}</dd>
-              </div>
-            ) : null}
             {user.account_state ? (
               <div className="tsw-profileDialogField">
                 <dt>账号状态</dt>

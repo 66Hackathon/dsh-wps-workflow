@@ -50,12 +50,17 @@ export function ProjectOverview({
   const owner = members.find((m) => m.user_id === project.owner_user_id)
     ?? members.find((m) => isProjectAdmin(m));
 
+  const repos = project.repositories ?? [];
+  const repoLinked = repos.length > 0;
+
   const integrations = [
     {
       key: 'git',
       label: '代码仓库',
-      linked: Boolean(project.git_repo_url?.trim()),
-      detail: project.git_repo_url ? '已关联' : '未关联',
+      linked: repoLinked,
+      detail: repoLinked
+        ? `${repos.length} 个 · ${repos.map((r) => r.dev_direction_label ?? r.dev_direction).join(' / ')}`
+        : '未关联',
     },
     {
       key: 'group',

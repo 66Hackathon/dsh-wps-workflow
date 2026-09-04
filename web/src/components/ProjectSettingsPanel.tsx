@@ -249,15 +249,20 @@ function FeaturesTab({
   project: Project;
   onLocked: (label: string) => void;
 }) {
-  const repoLinked = Boolean(project.git_repo_url?.trim());
+  const repos = project.repositories ?? [];
+  const repoLinked = repos.length > 0;
   const groupLinked = Boolean(project.wps_group_id?.trim() || project.wps_group_name?.trim());
 
   const items: FeatureCardItem[] = [
     {
       icon: '⟨/⟩',
       title: '代码仓库',
-      status: repoLinked ? `已关联 · ${project.git_default_branch || 'main'}` : '未关联',
-      description: '关联项目代码仓库，用于研发任务与提交记录。',
+      status: repoLinked
+        ? `已关联 ${repos.length} 个`
+        : '未关联',
+      description: repos.length > 0
+        ? repos.map((repo) => `${repo.dev_direction_label ?? repo.dev_direction} · ${repo.repo_url}`).join('；')
+        : '关联项目代码仓库，每个仓库需指定研发方向。',
       actions: [
         { label: '配置代码仓库' },
         { label: '了解更多', ghost: true },

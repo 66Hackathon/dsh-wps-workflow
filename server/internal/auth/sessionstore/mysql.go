@@ -46,13 +46,12 @@ func (m MySQL) GetUserByID(ctx context.Context, userID uint64) (session.UserProf
 		return session.UserProfile{}, err
 	}
 	return session.UserProfile{
-		ID:             user.ID,
-		WPSUserID:      user.WPSUserID,
-		Name:           user.Name,
-		NickName:       user.NickName,
-		AvatarURL:      user.AvatarURL,
-		CompanyName:    user.CompanyName,
-		OrganizationID: user.OrganizationID,
-		AccountState:   user.AccountState,
+		ID:           user.ID,
+		WPSUserID:    user.WPSUserID,
+		Name:         user.Name,
+		NickName:     user.NickName,
+		AvatarURL:    user.AvatarURL,
+		CompanyName:  user.CompanyName,
+		AccountState: user.AccountState,
 	}, nil
 }

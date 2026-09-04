@@ -8,7 +8,11 @@ import {
   userDisplayName,
 } from '../../memberRoles';
 import type { ProjectMember } from '../../types';
-import type { RequirementDraft } from '../../requirementCreate';
+import {
+  REQUIREMENT_DEV_DIRECTION_OPTIONS,
+  type RequirementDevDirection,
+  type RequirementDraft,
+} from '../../requirementCreate';
 import { CreateStepFooter } from './CreateStepFooter';
 
 interface Props {
@@ -33,14 +37,14 @@ export function CreateRequirementOwnerStep({
   onNext,
 }: Props) {
   const [members, setMembers] = useState<ProjectMember[]>([]);
-  const [ownerSearch, setOwnerSearch] = useState('');
-  const [watcherSearch, setWatcherSearch] = useState('');
-  const [ownerDropdownOpen, setOwnerDropdownOpen] = useState(false);
-  const [watcherDropdownOpen, setWatcherDropdownOpen] = useState(false);
+  const [developerSearch, setDeveloperSearch] = useState('');
+  const [testerSearch, setTesterSearch] = useState('');
+  const [developerOpen, setDeveloperOpen] = useState(false);
+  const [testerOpen, setTesterOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const ownerRef = useRef<HTMLDivElement>(null);
-  const watcherRef = useRef<HTMLDivElement>(null);
+  const developerRef = useRef<HTMLDivElement>(null);
+  const testerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,286 +66,263 @@ export function CreateRequirementOwnerStep({
 
   useEffect(() => {
     const onDocClick = (event: MouseEvent) => {
-      if (!ownerRef.current?.contains(event.target as Node)) {
-        setOwnerDropdownOpen(false);
-      }
-      if (!watcherRef.current?.contains(event.target as Node)) {
-        setWatcherDropdownOpen(false);
-      }
+      if (!developerRef.current?.contains(event.target as Node)) setDeveloperOpen(false);
+      if (!testerRef.current?.contains(event.target as Node)) setTesterOpen(false);
     };
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, []);
 
-  const selectedOwner = useMemo(
-    () => members.find((m) => m.user_id === draft.productOwnerUserId) ?? null,
-    [members, draft.productOwnerUserId],
+  const selectedDeveloper = useMemo(
+    () => members.find((m) => m.user_id === draft.developerUserId) ?? null,
+    [members, draft.developerUserId],
+  );
+  const selectedTester = useMemo(
+    () => members.find((m) => m.user_id === draft.testerUserId) ?? null,
+    [members, draft.testerUserId],
   );
 
-  const watcherIds = draft.watcherUserIds ?? [];
-
-  const filteredOwnerMembers = useMemo(() => {
-    const q = ownerSearch.trim().toLowerCase();
-    return members.filter((m) => {
-      if (!q) return true;
-      return m.user_name.toLowerCase().includes(q);
-    });
-  }, [members, ownerSearch]);
-
-  const filteredWatcherMembers = useMemo(() => {
-    const q = watcherSearch.trim().toLowerCase();
-    return members.filter((m) => {
-      if (watcherIds.includes(m.user_id)) return false;
-      if (m.user_id === draft.productOwnerUserId) return false;
-      if (!q) return true;
-      return m.user_name.toLowerCase().includes(q);
-    });
-  }, [members, watcherSearch, watcherIds, draft.productOwnerUserId]);
-
-  const watcherMembers = useMemo(
-    () => members.filter((m) => watcherIds.includes(m.user_id)),
-    [members, watcherIds],
-  );
-
-  const selectOwner = (member: ProjectMember) => {
-    const nextWatchers = watcherIds.filter((id) => id !== member.user_id);
-    onChange({
-      ...draft,
-      productOwnerUserId: member.user_id,
-      watcherUserIds: nextWatchers,
-    });
-    setOwnerSearch('');
-    setOwnerDropdownOpen(false);
+  const filterMembers = (search: string) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter((m) => m.user_name.toLowerCase().includes(q));
   };
 
-  const addWatcher = (member: ProjectMember) => {
-    if (watcherIds.includes(member.user_id)) return;
-    onChange({
-      ...draft,
-      watcherUserIds: [...watcherIds, member.user_id],
-    });
-    setWatcherSearch('');
+  const setDirection = (value: RequirementDevDirection) => {
+    onChange({ ...draft, devDirection: value });
   };
 
-  const removeWatcher = (userId: number) => {
-    onChange({
-      ...draft,
-      watcherUserIds: watcherIds.filter((id) => id !== userId),
-    });
-  };
-
-  const handleNext = (skipOwner = false) => {
-    if (!skipOwner && !draft.productOwnerUserId) {
-      setError('请选择产品负责人');
+  const handleNext = () => {
+    if (!draft.devDirection) {
+      setError('请选择研发方向');
+      return;
+    }
+    if (!draft.developerUserId) {
+      setError('请指定研发负责人');
+      return;
+    }
+    if (!draft.testerUserId) {
+      setError('请指定测试负责人');
       return;
     }
     setError(null);
     onNext();
   };
 
+  const directionLabel = draft.devDirection === 'BACKEND' ? '后端' : '前端';
+
   return (
-    <div className="tsw-createWizardLayout tsw-createWizardLayoutWide">
+    <div className="tsw-createWizardLayout">
       <div className="tsw-createWizardMain">
         <div className="tsw-createForm tsw-createWizardCard tsw-createFormFill">
-          <h3 className="tsw-createWizardHeading">设置负责人和关注者</h3>
+          <h3 className="tsw-createWizardHeading">研发方向与负责人</h3>
+          <p className="tsw-createWizardSub tsw-muted">
+            一个需求对应一名研发负责人。产品、研发、测试可以由同一人兼任。请先选择研发方向，再指定负责人。创建者即为产品负责人。
+          </p>
 
           <div className="tsw-formRow">
-            <label className="tsw-fieldLabel" htmlFor="req-owner-search">
-              产品负责人 <span className="tsw-required">*</span>
-            </label>
-            <p className="tsw-fieldDesc">
-              负责需求规格、产品方案与验收标准，进入「产品设计中」阶段。
-            </p>
-
-            {selectedOwner ? (
-              <div className="tsw-reqOwnerSelected">
-                <span
-                  className="tsw-userAvatar"
-                  style={{ background: userAvatarColor(selectedOwner.user_name) }}
-                  aria-hidden="true"
-                >
-                  {userAvatarLetter(selectedOwner.user_name)}
-                </span>
-                <span className="tsw-reqOwnerSelectedMeta">
-                  <strong>{userDisplayName(selectedOwner.user_name)}</strong>
-                  <span className="tsw-reqRoleTags">
-                    {memberRoleTags(selectedOwner).map((tag) => (
-                      <span key={tag} className="tsw-reqRoleTag">{tag}</span>
-                    ))}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  className="tsw-linkBtn"
-                  onClick={() => {
-                    onChange({ ...draft, productOwnerUserId: undefined });
-                    setOwnerDropdownOpen(true);
-                  }}
-                >
-                  更换
-                </button>
-              </div>
-            ) : null}
-
-            <div className="tsw-memberSearchWrap" ref={ownerRef}>
-              <div className="tsw-memberSearchBox">
-                <span className="tsw-memberSearchIcon" aria-hidden="true">🔍</span>
-                <input
-                  id="req-owner-search"
-                  className="tsw-memberSearchInput"
-                  placeholder="仅可选择当前项目成员"
-                  value={ownerSearch}
-                  onChange={(e) => {
-                    setOwnerSearch(e.target.value);
-                    setOwnerDropdownOpen(true);
-                  }}
-                  onFocus={() => setOwnerDropdownOpen(true)}
-                  disabled={loading}
-                />
-              </div>
-              {loading ? (
-                <p className="tsw-muted tsw-memberSearchEmpty">正在加载项目成员…</p>
-              ) : null}
-              {ownerDropdownOpen && !loading ? (
-                <div className="tsw-memberSearchDropdown tsw-memberSearchDropdownLg">
-                  {filteredOwnerMembers.length ? filteredOwnerMembers.map((member) => {
-                    const label = userDisplayName(member.user_name);
-                    const selected = draft.productOwnerUserId === member.user_id;
-                    return (
-                      <button
-                        key={member.id}
-                        type="button"
-                        className="tsw-reqMemberOption"
-                        data-selected={selected ? 'true' : 'false'}
-                        onClick={() => selectOwner(member)}
-                      >
-                        <span
-                          className="tsw-memberAvatar"
-                          style={{ background: userAvatarColor(member.user_name) }}
-                        >
-                          {userAvatarLetter(label)}
-                        </span>
-                        <span className="tsw-memberSearchOptionText">
-                          <strong>{label}</strong>
-                          <span className="tsw-reqRoleTags">
-                            {memberRoleTags(member).map((tag) => (
-                              <span key={tag} className="tsw-reqRoleTag">{tag}</span>
-                            ))}
-                          </span>
-                        </span>
-                        {selected ? <span className="tsw-ownerPickerCheck">✓</span> : null}
-                      </button>
-                    );
-                  }) : (
-                    <p className="tsw-muted tsw-memberSearchEmpty">未找到匹配成员</p>
-                  )}
-                </div>
-              ) : null}
+            <span className="tsw-fieldLabel">
+              研发方向
+              <span className="tsw-required"> *</span>
+            </span>
+            <div className="tsw-reqDirectionChecks" role="radiogroup" aria-label="研发方向">
+              {REQUIREMENT_DEV_DIRECTION_OPTIONS.map((opt) => {
+                const selected = draft.devDirection === opt.value;
+                return (
+                  <label key={opt.value} className="tsw-reqDirectionCheck">
+                    <input
+                      type="radio"
+                      name="req-dev-direction"
+                      checked={selected}
+                      onChange={() => setDirection(opt.value)}
+                    />
+                    <span>{opt.label}</span>
+                  </label>
+                );
+              })}
             </div>
           </div>
 
-          <div className="tsw-formRow">
-            <label className="tsw-fieldLabel" htmlFor="req-watcher-search">
-              需求关注者 <span className="tsw-optional">（可选）</span>
-            </label>
-            <p className="tsw-fieldDesc">
-              关注者可接收需求状态变更通知，不参与审批流转。
-            </p>
+          <PersonPicker
+            label={`${directionLabel}研发负责人`}
+            required
+            fieldId="req-developer-search"
+            selected={selectedDeveloper}
+            search={developerSearch}
+            open={developerOpen}
+            loading={loading}
+            members={filterMembers(developerSearch)}
+            selectedUserId={draft.developerUserId}
+            wrapRef={developerRef}
+            onSearch={(value) => {
+              setDeveloperSearch(value);
+              setDeveloperOpen(true);
+            }}
+            onFocus={() => setDeveloperOpen(true)}
+            onSelect={(member) => {
+              onChange({ ...draft, developerUserId: member.user_id });
+              setDeveloperSearch('');
+              setDeveloperOpen(false);
+            }}
+            onClear={() => {
+              onChange({ ...draft, developerUserId: undefined });
+              setDeveloperOpen(true);
+            }}
+          />
 
-            <div className="tsw-memberSearchWrap" ref={watcherRef}>
-              <div className="tsw-reqWatcherInput">
-                {watcherMembers.map((member) => (
-                  <span key={member.id} className="tsw-reqWatcherTag">
-                    {userDisplayName(member.user_name)}
-                    <button
-                      type="button"
-                      className="tsw-reqWatcherTagRemove"
-                      aria-label={`移除 ${member.user_name}`}
-                      onClick={() => removeWatcher(member.user_id)}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                <input
-                  id="req-watcher-search"
-                  className="tsw-reqWatcherSearch"
-                  placeholder={watcherMembers.length ? '继续搜索添加' : '搜索项目成员'}
-                  value={watcherSearch}
-                  onChange={(e) => {
-                    setWatcherSearch(e.target.value);
-                    setWatcherDropdownOpen(true);
-                  }}
-                  onFocus={() => setWatcherDropdownOpen(true)}
-                  disabled={loading}
-                />
-              </div>
-              {watcherDropdownOpen && !loading && filteredWatcherMembers.length ? (
-                <div className="tsw-memberSearchDropdown tsw-memberSearchDropdownLg">
-                  {filteredWatcherMembers.map((member) => {
-                    const label = userDisplayName(member.user_name);
-                    return (
-                      <button
-                        key={member.id}
-                        type="button"
-                        className="tsw-reqMemberOption"
-                        onClick={() => addWatcher(member)}
-                      >
-                        <span
-                          className="tsw-memberAvatar"
-                          style={{ background: userAvatarColor(member.user_name) }}
-                        >
-                          {userAvatarLetter(label)}
-                        </span>
-                        <span className="tsw-memberSearchOptionText">
-                          <strong>{label}</strong>
-                          <span className="tsw-reqRoleTags">
-                            {memberRoleTags(member).map((tag) => (
-                              <span key={tag} className="tsw-reqRoleTag">{tag}</span>
-                            ))}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="tsw-reqInfoCallout">
-            <span className="tsw-reqInfoCalloutIcon" aria-hidden="true">i</span>
-            <p>测试负责人将在研发分配阶段指定，当前无需设置。</p>
-          </div>
+          <PersonPicker
+            label="测试负责人"
+            required
+            fieldId="req-tester-search"
+            selected={selectedTester}
+            search={testerSearch}
+            open={testerOpen}
+            loading={loading}
+            members={filterMembers(testerSearch)}
+            selectedUserId={draft.testerUserId}
+            wrapRef={testerRef}
+            onSearch={(value) => {
+              setTesterSearch(value);
+              setTesterOpen(true);
+            }}
+            onFocus={() => setTesterOpen(true)}
+            onSelect={(member) => {
+              onChange({ ...draft, testerUserId: member.user_id });
+              setTesterSearch('');
+              setTesterOpen(false);
+            }}
+            onClear={() => {
+              onChange({ ...draft, testerUserId: undefined });
+              setTesterOpen(true);
+            }}
+          />
 
           {error ? <p className="tsw-error">{error}</p> : null}
 
           <CreateStepFooter
             onPrev={onPrev}
-            skipLabel="稍后设置负责人"
-            onSkip={() => handleNext(true)}
-            onNext={() => handleNext(false)}
-            showSkip
+            onNext={handleNext}
+            showSkip={false}
           />
         </div>
       </div>
+    </div>
+  );
+}
 
-      <aside className="tsw-createAside">
-        <div className="tsw-createAsideCard tsw-createAsideCardFill">
-          <div className="tsw-createAsideHead">
-            <span className="tsw-createAsideIcon" aria-hidden="true">i</span>
-            <strong>负责人规则</strong>
-          </div>
-          <ul className="tsw-createAsideList">
-            <li>产品负责人为必填项，负责需求从创建到验收的全流程</li>
-            <li>关注者可选，仅接收通知不参与审批</li>
-            <li>研发、测试负责人在研发分配阶段指定，且与产品负责人不可重复</li>
-            <li>同一需求中，每人只能承担一种职能角色</li>
-            <li>负责人须为当前项目成员</li>
-            <li>负责人变更将记录在操作日志</li>
-          </ul>
+function PersonPicker({
+  label,
+  required,
+  fieldId,
+  selected,
+  search,
+  open,
+  loading,
+  members,
+  selectedUserId,
+  wrapRef,
+  onSearch,
+  onFocus,
+  onSelect,
+  onClear,
+}: {
+  label: string;
+  required?: boolean;
+  fieldId: string;
+  selected: ProjectMember | null;
+  search: string;
+  open: boolean;
+  loading: boolean;
+  members: ProjectMember[];
+  selectedUserId?: number;
+  wrapRef: React.Ref<HTMLDivElement>;
+  onSearch: (value: string) => void;
+  onFocus: () => void;
+  onSelect: (member: ProjectMember) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="tsw-formRow">
+      <label className="tsw-fieldLabel" htmlFor={fieldId}>
+        {label}
+        {required ? <span className="tsw-required"> *</span> : null}
+      </label>
+
+      {selected ? (
+        <div className="tsw-reqOwnerSelected">
+          <span
+            className="tsw-userAvatar"
+            style={{ background: userAvatarColor(selected.user_name) }}
+            aria-hidden="true"
+          >
+            {userAvatarLetter(selected.user_name)}
+          </span>
+          <span className="tsw-reqOwnerSelectedMeta">
+            <strong>{userDisplayName(selected.user_name)}</strong>
+            <span className="tsw-reqRoleTags">
+              {memberRoleTags(selected).map((tag) => (
+                <span key={tag} className="tsw-reqRoleTag">{tag}</span>
+              ))}
+            </span>
+          </span>
+          <button type="button" className="tsw-linkBtn" onClick={onClear}>
+            更换
+          </button>
         </div>
-      </aside>
+      ) : null}
+
+      <div className="tsw-memberSearchWrap" ref={wrapRef}>
+        <div className="tsw-memberSearchBox">
+          <span className="tsw-memberSearchIcon" aria-hidden="true">🔍</span>
+          <input
+            id={fieldId}
+            className="tsw-memberSearchInput"
+            placeholder="从当前项目成员中选择"
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+            onFocus={onFocus}
+            disabled={loading}
+          />
+        </div>
+        {loading ? (
+          <p className="tsw-muted tsw-memberSearchEmpty">正在加载项目成员…</p>
+        ) : null}
+        {open && !loading ? (
+          <div className="tsw-memberSearchDropdown tsw-memberSearchDropdownLg">
+            {members.length ? members.map((member) => {
+              const name = userDisplayName(member.user_name);
+              const isSelected = selectedUserId === member.user_id;
+              return (
+                <button
+                  key={member.id}
+                  type="button"
+                  className="tsw-reqMemberOption"
+                  data-selected={isSelected ? 'true' : 'false'}
+                  onClick={() => onSelect(member)}
+                >
+                  <span
+                    className="tsw-memberAvatar"
+                    style={{ background: userAvatarColor(member.user_name) }}
+                  >
+                    {userAvatarLetter(name)}
+                  </span>
+                  <span className="tsw-memberSearchOptionText">
+                    <strong>{name}</strong>
+                    <span className="tsw-reqRoleTags">
+                      {memberRoleTags(member).map((tag) => (
+                        <span key={tag} className="tsw-reqRoleTag">{tag}</span>
+                      ))}
+                    </span>
+                  </span>
+                  {isSelected ? <span className="tsw-ownerPickerCheck">✓</span> : null}
+                </button>
+              );
+            }) : (
+              <p className="tsw-muted tsw-memberSearchEmpty">未找到匹配成员</p>
+            )}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

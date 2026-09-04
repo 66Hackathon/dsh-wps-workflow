@@ -24,6 +24,7 @@ interface Props {
   loading?: boolean;
   onCreate: () => void;
   onOpen: (requirementId: number) => void;
+  onView: (requirementId: number) => void;
 }
 
 export function RequirementListPanel({
@@ -32,6 +33,7 @@ export function RequirementListPanel({
   loading,
   onCreate,
   onOpen,
+  onView,
 }: Props) {
   const [query, setQuery] = useState('');
   const [lifecycle, setLifecycle] = useState<RequirementLifecycleFilter>('all');
@@ -154,9 +156,14 @@ export function RequirementListPanel({
                     </td>
                     <td className="tsw-muted">{formatRelativeFromISO(req.updated_at)}</td>
                     <td>
-                      <button type="button" className="tsw-linkBtn" onClick={() => onOpen(req.id)}>
-                        查看
-                      </button>
+                      <div className="tsw-reqTableActions">
+                        <button type="button" className="tsw-linkBtn" onClick={() => onView(req.id)}>
+                          查看需求
+                        </button>
+                        <button type="button" className="tsw-linkBtn" onClick={() => onOpen(req.id)}>
+                          进入
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -241,7 +248,7 @@ export function RequirementListPanel({
           onClick={() => applyLifecycle('active')}
         />
         <StatCard
-          label="已归档"
+          label="已结束"
           value={stats.archived}
           tone="brown"
           active={lifecycle === 'archived'}
