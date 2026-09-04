@@ -24,19 +24,32 @@ type User struct {
 
 // Project is a minimal project row for list responses.
 type Project struct {
-	ID               uint64 `json:"id"`
-	ProjectCode      string `json:"project_code"`
-	Name             string `json:"name"`
-	Description      string `json:"description,omitempty"`
-	Status           string `json:"status"`
-	WPSGroupID       string `json:"wps_group_id,omitempty"`
-	WPSGroupName     string `json:"wps_group_name,omitempty"`
-	CreatedBy        uint64 `json:"created_by,omitempty"`
-	CreatedAt        string `json:"created_at,omitempty"`
-	UpdatedAt        string `json:"updated_at,omitempty"`
-	RequirementCount int    `json:"requirement_count"`
-	BugCount         int    `json:"bug_count"`
-	RepositoryCount  int    `json:"repository_count"`
+	ID             uint64 `json:"id"`
+	Name           string `json:"name"`
+	Description    string `json:"description,omitempty"`
+	OwnerUserID    uint64 `json:"owner_user_id"`
+	WPSGroupID     string `json:"wps_group_id,omitempty"`
+	WPSGroupName   string `json:"wps_group_name,omitempty"`
+	WPSDocFolderID string `json:"wps_doc_folder_id,omitempty"`
+	CreatedAt      string `json:"created_at,omitempty"`
+	UpdatedAt      string `json:"updated_at,omitempty"`
+
+	// Derived counters.
+	RequirementCount int `json:"requirement_count"`
+	BugCount         int `json:"bug_count"`
+	RepositoryCount  int `json:"repository_count"`
+
+	// Synthesized for API compatibility; projects has no such columns.
+	ProjectCode string `json:"project_code"`
+	Status      string `json:"status"`
+	CreatedBy   uint64 `json:"created_by,omitempty"`
+}
+
+// applyProjectCompatFields fills the synthesized legacy JSON fields.
+func (p *Project) applyProjectCompatFields() {
+	p.ProjectCode = fmt.Sprintf("PRJ-%06d", p.ID)
+	p.Status = "ACTIVE"
+	p.CreatedBy = p.OwnerUserID
 }
 
 // Repository wraps MySQL access for TeamSpace.
@@ -145,16 +158,11 @@ func nullIfEmpty(value string) any {
 	return value
 }
 
-// ListProjects returns active projects ordered by id desc.
+// ListProjects returns projects ordered by id desc.
 func (r *Repository) ListProjects(ctx context.Context) ([]ProjectDetail, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_code, name, IFNULL(description, ''), status, owner_user_id,
-		       IFNULL(wps_group_id, ''), IFNULL(wps_group_name, ''),
-		       created_by,
-		       DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ'),
-		       DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ')
+		SELECT `+projectSelectColumns+`
 		FROM projects
-		WHERE status = 'ACTIVE'
 		ORDER BY id DESC
 		LIMIT 100`)
 	if err != nil {
@@ -166,11 +174,7 @@ func (r *Repository) ListProjects(ctx context.Context) ([]ProjectDetail, error) 
 	ids := make([]uint64, 0)
 	for rows.Next() {
 		var item ProjectDetail
-		if err := rows.Scan(
-			&item.ID, &item.ProjectCode, &item.Name, &item.Description, &item.Status, &item.OwnerUserID,
-			&item.WPSGroupID, &item.WPSGroupName,
-			&item.CreatedBy, &item.CreatedAt, &item.UpdatedAt,
-		); err != nil {
+		if err := scanProject(rows, &item.Project); err != nil {
 			return nil, err
 		}
 		projects = append(projects, item)

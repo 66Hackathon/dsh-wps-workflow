@@ -45,7 +45,7 @@ func deleteRequirementsByIDs(ctx context.Context, tx *sql.Tx, requirementIDs []u
 	args := uint64Args(requirementIDs)
 	in := placeholders(len(requirementIDs))
 
-	childIDs, err := queryIDs(ctx, tx, `SELECT id FROM requirements WHERE parent_item_id IN (`+in+`)`, args...)
+	childIDs, err := queryIDs(ctx, tx, `SELECT id FROM requirements WHERE parent_requirement_id IN (`+in+`)`, args...)
 	if err != nil {
 		return err
 	}
@@ -55,7 +55,10 @@ func deleteRequirementsByIDs(ctx context.Context, tx *sql.Tx, requirementIDs []u
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM status_change_log WHERE resource_type = 'REQUIREMENT' AND resource_id IN (`+in+`)`, args...); err != nil {
+	if err := deleteByIDs(ctx, tx, "documents", "requirement_id", requirementIDs); err != nil {
+		return err
+	}
+	if err := deleteByIDs(ctx, tx, "status_change_logs", "requirement_id", requirementIDs); err != nil {
 		return err
 	}
 	if err := deleteByIDs(ctx, tx, "requirement_stage_submissions", "requirement_id", requirementIDs); err != nil {
@@ -73,6 +76,9 @@ func deleteProjectGraph(ctx context.Context, tx *sql.Tx, projectID uint64) error
 		return err
 	}
 
+	if _, err := tx.ExecContext(ctx, `DELETE FROM documents WHERE project_id = ?`, projectID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM project_repositories WHERE project_id = ?`, projectID); err != nil {
 		return err
 	}

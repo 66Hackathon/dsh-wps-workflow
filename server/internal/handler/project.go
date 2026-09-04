@@ -43,7 +43,6 @@ func (h *ProjectHandler) handleCreate(c *gin.Context) {
 	}
 
 	var body struct {
-		ProjectCode string `json:"project_code"`
 		Name        string `json:"name"`
 		Description string `json:"description"`
 	}
@@ -51,21 +50,19 @@ func (h *ProjectHandler) handleCreate(c *gin.Context) {
 		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
-	if body.ProjectCode == "" || body.Name == "" {
-		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "missing_fields", "message": "project_code and name are required"})
+	if strings.TrimSpace(body.Name) == "" {
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "missing_fields", "message": "name is required"})
 		return
 	}
-	if err := domain.ValidateProjectCreate(body.ProjectCode, body.Name, body.Description, record.User.ID); err != nil {
+	if err := domain.ValidateProjectCreate(body.Name, body.Description, record.User.ID); err != nil {
 		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_fields", "message": err.Error()})
 		return
 	}
 
 	projectID, err := h.repo.CreateProject(c.Request.Context(), repository.CreateProjectInput{
-		ProjectCode: body.ProjectCode,
 		Name:        body.Name,
 		Description: body.Description,
 		OwnerUserID: record.User.ID,
-		CreatedBy:   record.User.ID,
 	})
 	if err != nil {
 		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "create_failed", "message": err.Error()})
@@ -138,7 +135,6 @@ func (h *ProjectHandler) handleAddMember(c *gin.Context) {
 	member, err := h.repo.AddProjectMember(c.Request.Context(), repository.AddProjectMemberInput{
 		ProjectID: projectID,
 		UserID:    body.UserID,
-		RoleCodes: body.RoleCodes,
 		InvitedBy: record.User.ID,
 	})
 	if err != nil {
@@ -191,7 +187,8 @@ func (h *ProjectHandler) handleUpdateMember(c *gin.Context) {
 		return
 	}
 
-	member, err := h.repo.UpdateProjectMemberRoles(c.Request.Context(), projectID, memberID, body.RoleCodes)
+	// Roles are no longer persisted; return the current synthesized membership.
+	member, err := h.repo.GetProjectMember(c.Request.Context(), projectID, memberID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeJSON(c, http.StatusNotFound, map[string]string{"error": "not_found", "message": err.Error()})
@@ -383,24 +380,31 @@ func (h *ProjectHandler) handleCreateRepository(c *gin.Context) {
 	}
 
 	var body struct {
-		RepoName      string `json:"repo_name"`
-		RepoURL       string `json:"repo_url"`
-		DefaultBranch string `json:"default_branch"`
-		DevDirection  string `json:"dev_direction"`
-		SortOrder     uint32 `json:"sort_order"`
+		RepositoryType string `json:"repository_type"`
+		DevDirection   string `json:"dev_direction"` // legacy alias
+		RepositoryURL  string `json:"repository_url"`
+		RepoURL        string `json:"repo_url"` // legacy alias
+		DefaultBranch  string `json:"default_branch"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
+	repoType := body.RepositoryType
+	if repoType == "" {
+		repoType = body.DevDirection
+	}
+	repoURL := body.RepositoryURL
+	if repoURL == "" {
+		repoURL = body.RepoURL
+	}
 
 	item, err := h.repo.CreateProjectRepository(c.Request.Context(), repository.CreateProjectRepositoryInput{
-		ProjectID:     projectID,
-		RepoName:      body.RepoName,
-		RepoURL:       body.RepoURL,
-		DefaultBranch: body.DefaultBranch,
-		DevDirection:  body.DevDirection,
-		SortOrder:     body.SortOrder,
+		ProjectID:      projectID,
+		RepositoryType: repoType,
+		RepositoryURL:  repoURL,
+		DefaultBranch:  body.DefaultBranch,
+		ConfiguredBy:   record.User.ID,
 	})
 	if err != nil {
 		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "create_failed", "message": err.Error()})
@@ -427,11 +431,11 @@ func (h *ProjectHandler) handleReplaceRepositories(c *gin.Context) {
 
 	var body struct {
 		Items []struct {
-			RepoName      string `json:"repo_name"`
-			RepoURL       string `json:"repo_url"`
-			DefaultBranch string `json:"default_branch"`
-			DevDirection  string `json:"dev_direction"`
-			SortOrder     uint32 `json:"sort_order"`
+			RepositoryType string `json:"repository_type"`
+			DevDirection   string `json:"dev_direction"`
+			RepositoryURL  string `json:"repository_url"`
+			RepoURL        string `json:"repo_url"`
+			DefaultBranch  string `json:"default_branch"`
 		} `json:"items"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -440,18 +444,21 @@ func (h *ProjectHandler) handleReplaceRepositories(c *gin.Context) {
 	}
 
 	inputs := make([]repository.CreateProjectRepositoryInput, 0, len(body.Items))
-	for i, item := range body.Items {
-		sortOrder := item.SortOrder
-		if sortOrder == 0 {
-			sortOrder = uint32(i + 1)
+	for _, item := range body.Items {
+		repoType := item.RepositoryType
+		if repoType == "" {
+			repoType = item.DevDirection
+		}
+		repoURL := item.RepositoryURL
+		if repoURL == "" {
+			repoURL = item.RepoURL
 		}
 		inputs = append(inputs, repository.CreateProjectRepositoryInput{
-			ProjectID:     projectID,
-			RepoName:      item.RepoName,
-			RepoURL:       item.RepoURL,
-			DefaultBranch: item.DefaultBranch,
-			DevDirection:  item.DevDirection,
-			SortOrder:     sortOrder,
+			ProjectID:      projectID,
+			RepositoryType: repoType,
+			RepositoryURL:  repoURL,
+			DefaultBranch:  item.DefaultBranch,
+			ConfiguredBy:   record.User.ID,
 		})
 	}
 
@@ -485,23 +492,30 @@ func (h *ProjectHandler) handleUpdateRepository(c *gin.Context) {
 	}
 
 	var body struct {
-		RepoName      *string `json:"repo_name"`
-		RepoURL       *string `json:"repo_url"`
-		DefaultBranch *string `json:"default_branch"`
-		DevDirection  *string `json:"dev_direction"`
-		SortOrder     *uint32 `json:"sort_order"`
+		RepositoryType *string `json:"repository_type"`
+		DevDirection   *string `json:"dev_direction"`
+		RepositoryURL  *string `json:"repository_url"`
+		RepoURL        *string `json:"repo_url"`
+		DefaultBranch  *string `json:"default_branch"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
+	repoType := body.RepositoryType
+	if repoType == nil {
+		repoType = body.DevDirection
+	}
+	repoURL := body.RepositoryURL
+	if repoURL == nil {
+		repoURL = body.RepoURL
+	}
 
 	item, err := h.repo.UpdateProjectRepository(c.Request.Context(), projectID, repoID, repository.UpdateProjectRepositoryInput{
-		RepoName:      body.RepoName,
-		RepoURL:       body.RepoURL,
-		DefaultBranch: body.DefaultBranch,
-		DevDirection:  body.DevDirection,
-		SortOrder:     body.SortOrder,
+		RepositoryType: repoType,
+		RepositoryURL:  repoURL,
+		DefaultBranch:  body.DefaultBranch,
+		ConfiguredBy:   record.User.ID,
 	})
 	if err != nil {
 		status := http.StatusBadRequest

@@ -1,12 +1,12 @@
 package handler
 
 import (
-	"github.com/gin-gonic/gin"
-
 	"net/http"
 	"strings"
-	"time"
 
+	"github.com/gin-gonic/gin"
+
+	"github.com/66hackathon/dsh-wps-workflow/server/internal/domain"
 	"github.com/66hackathon/dsh-wps-workflow/server/internal/repository"
 )
 
@@ -104,39 +104,36 @@ func (h *RequirementHandler) handleCreate(c *gin.Context) {
 	}
 
 	var body struct {
-		RequirementCode        string `json:"requirement_code"`
-		Title                  string `json:"title"`
-		Description            string `json:"description"`
-		Priority               string `json:"priority"`
-		DevDirections          string `json:"dev_directions"`
-		DeveloperUserID        uint64 `json:"developer_user_id"`
-		BackendDeveloperUserID uint64 `json:"backend_developer_user_id"`
-		TesterUserID           uint64 `json:"tester_user_id"`
-		PlannedStartAt         string `json:"planned_start_at"`
-		PlannedEndAt           string `json:"planned_end_at"`
+		Title           string `json:"title"`
+		Description     string `json:"description"`
+		Priority        string `json:"priority"`
+		DevelopmentType string `json:"development_type"`
+		DevDirections   string `json:"dev_directions"` // legacy alias
+		DeveloperUserID uint64 `json:"developer_user_id"`
+		TesterUserID    uint64 `json:"tester_user_id"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
-	if body.RequirementCode == "" || body.Title == "" || body.Description == "" {
-		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "missing_fields", "message": "requirement_code, title and description are required"})
+	if strings.TrimSpace(body.Title) == "" || strings.TrimSpace(body.Description) == "" {
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "missing_fields", "message": "title and description are required"})
 		return
+	}
+	developmentType := body.DevelopmentType
+	if developmentType == "" {
+		developmentType = body.DevDirections
 	}
 
 	item, err := h.repo.CreateRequirement(c.Request.Context(), repository.CreateRequirementInput{
-		ProjectID:              projectID,
-		RequirementCode:        body.RequirementCode,
-		Title:                  body.Title,
-		Description:            body.Description,
-		Priority:               body.Priority,
-		DevDirections:          body.DevDirections,
-		DeveloperUserID:        body.DeveloperUserID,
-		BackendDeveloperUserID: body.BackendDeveloperUserID,
-		TesterUserID:           body.TesterUserID,
-		PlannedStartAt:         parseOptionalDateTime(body.PlannedStartAt),
-		PlannedEndAt:           parseOptionalDateTime(body.PlannedEndAt),
-		CreatedBy:              record.User.ID,
+		ProjectID:       projectID,
+		Title:           body.Title,
+		Description:     body.Description,
+		Priority:        body.Priority,
+		DevelopmentType: developmentType,
+		DeveloperUserID: body.DeveloperUserID,
+		TesterUserID:    body.TesterUserID,
+		CreatedBy:       record.User.ID,
 	})
 	if err != nil {
 		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "create_failed", "message": err.Error()})
@@ -180,6 +177,7 @@ func (h *RequirementHandler) handleTransition(c *gin.Context) {
 	writeJSON(c, http.StatusOK, item)
 }
 
+// handleCompleteDevelopment is a convenience wrapper around transition to TESTING.
 func (h *RequirementHandler) handleCompleteDevelopment(c *gin.Context) {
 	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
@@ -196,26 +194,27 @@ func (h *RequirementHandler) handleCompleteDevelopment(c *gin.Context) {
 	var body struct {
 		DevSummary          string `json:"dev_summary"`
 		ImplementationNotes string `json:"implementation_notes"`
+		DeveloperUserID     uint64 `json:"developer_user_id"`
 	}
 	_ = c.ShouldBindJSON(&body)
 
-	result, err := h.repo.CompleteDevelopment(
-		c.Request.Context(), id, record.User.ID, body.DevSummary, body.ImplementationNotes,
-	)
+	item, err := h.repo.TransitionRequirementStatus(c.Request.Context(), id, record.User.ID, domain.StatusTesting, repository.StageSubmissionInput{
+		DevSummary:          body.DevSummary,
+		ImplementationNotes: body.ImplementationNotes,
+		DeveloperUserID:     body.DeveloperUserID,
+	})
 	if err != nil {
 		msg := err.Error()
 		status := http.StatusBadRequest
-		if strings.Contains(msg, "only the assigned") {
+		if strings.Contains(msg, "only the assigned") || strings.Contains(msg, "permission denied") {
 			status = http.StatusForbidden
 		}
 		writeJSON(c, status, map[string]string{"error": "complete_development_failed", "message": msg})
 		return
 	}
-	writeJSON(c, http.StatusOK, result)
+	writeJSON(c, http.StatusOK, item)
 }
 
-// handleCreateBug creates a Bug sub-item under a parent requirement.
-// The bug inherits developer/tester from the parent, starts at DEVELOPMENT.
 func (h *RequirementHandler) handleCreateBug(c *gin.Context) {
 	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
@@ -230,68 +229,66 @@ func (h *RequirementHandler) handleCreateBug(c *gin.Context) {
 	}
 
 	var body struct {
-		RequirementCode  string `json:"requirement_code"`
 		Title            string `json:"title"`
 		Description      string `json:"description"`
 		Priority         string `json:"priority"`
-		TriggeredAtStage string `json:"triggered_at_stage"` // TESTING / REGRESSION
+		SourceStageCode  string `json:"source_stage_code"`
+		TriggeredAtStage string `json:"triggered_at_stage"` // legacy alias
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
-	if body.RequirementCode == "" || strings.TrimSpace(body.Title) == "" {
-		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "missing_fields", "message": "requirement_code and title are required"})
+	if strings.TrimSpace(body.Title) == "" {
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "missing_fields", "message": "title is required"})
 		return
 	}
 
-	// Fetch parent to inherit developer/tester
 	parent, err := h.repo.GetRequirement(c.Request.Context(), parentID)
 	if err != nil {
 		writeJSON(c, http.StatusNotFound, map[string]string{"error": "parent_not_found"})
 		return
 	}
-
-	// Validate that creator is the tester (only tester can create a bug sub-item)
 	if parent.TesterUserID == nil || *parent.TesterUserID != record.User.ID {
 		writeJSON(c, http.StatusForbidden, map[string]string{"error": "forbidden", "message": "only the assigned tester can create a bug sub-item"})
 		return
 	}
 
-	var devID, backendID, testerID uint64
+	var devID, testerID uint64
 	if parent.DeveloperUserID != nil {
 		devID = *parent.DeveloperUserID
-	}
-	if parent.BackendDeveloperUserID != nil {
-		backendID = *parent.BackendDeveloperUserID
 	}
 	if parent.TesterUserID != nil {
 		testerID = *parent.TesterUserID
 	}
-
-	triggeredAt := body.TriggeredAtStage
-	if triggeredAt == "" {
-		triggeredAt = parent.CurrentStatus
+	developmentType := ""
+	if parent.DevelopmentType != nil {
+		developmentType = *parent.DevelopmentType
+	}
+	sourceStage := body.SourceStageCode
+	if sourceStage == "" {
+		sourceStage = body.TriggeredAtStage
+	}
+	if sourceStage == "" {
+		sourceStage = parent.CurrentStatus
 	}
 
 	bug, err := h.repo.CreateBugItem(c.Request.Context(), repository.CreateBugItemInput{
-		ProjectID:              parent.ProjectID,
-		RequirementCode:        body.RequirementCode,
-		Title:                  strings.TrimSpace(body.Title),
-		Description:            body.Description,
-		Priority:               body.Priority,
-		ParentItemID:           parentID,
-		TriggeredAtStage:       triggeredAt,
-		DeveloperUserID:        devID,
-		BackendDeveloperUserID: backendID,
-		TesterUserID:           testerID,
-		CreatedBy:              record.User.ID,
+		ProjectID:           parent.ProjectID,
+		Title:               strings.TrimSpace(body.Title),
+		Description:         body.Description,
+		Priority:            body.Priority,
+		ParentRequirementID: parentID,
+		SourceStageCode:     sourceStage,
+		DevelopmentType:     developmentType,
+		DeveloperUserID:     devID,
+		TesterUserID:        testerID,
+		CreatedBy:           record.User.ID,
 	})
 	if err != nil {
 		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "create_failed", "message": err.Error()})
 		return
 	}
-	// 主需求保持当前状态（TESTING 等），仅返回新建的 Bug 子需求
 	writeJSON(c, http.StatusCreated, map[string]any{
 		"bug":              bug,
 		"main_requirement": parent,
@@ -330,7 +327,6 @@ func (h *RequirementHandler) handleTimeline(c *gin.Context) {
 	writeJSON(c, http.StatusOK, timeline)
 }
 
-// handleUpdateRegression allows changing a failed REGRESSION result to PASS.
 func (h *RequirementHandler) handleUpdateRegression(c *gin.Context) {
 	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
@@ -352,23 +348,4 @@ func (h *RequirementHandler) handleUpdateRegression(c *gin.Context) {
 		return
 	}
 	writeJSON(c, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func parseOptionalDateTime(raw string) *time.Time {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	layouts := []string{
-		time.RFC3339,
-		"2006-01-02T15:04:05Z07:00",
-		"2006-01-02",
-	}
-	for _, layout := range layouts {
-		if parsed, err := time.Parse(layout, raw); err == nil {
-			utc := parsed.UTC()
-			return &utc
-		}
-	}
-	return nil
 }

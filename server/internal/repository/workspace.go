@@ -120,12 +120,12 @@ func (r *Repository) GetWorkspaceSummary(ctx context.Context, userID uint64) (Wo
 func (r *Repository) listWorkspaceTodos(ctx context.Context, userID uint64) ([]WorkspaceItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
-			r.item_type,
+			r.requirement_type,
 			r.id, r.requirement_code, r.title, r.project_id, p.name,
 			CASE
-				WHEN r.item_type = 'BUG' AND r.current_status = 'DEVELOPMENT' THEN '研发负责人'
-				WHEN r.item_type = 'BUG' AND r.current_status = 'TESTING' THEN '测试负责人'
-				WHEN r.item_type = 'BUG' AND r.current_status = 'PRODUCT_ACCEPTANCE' THEN '验收人'
+				WHEN r.requirement_type = 'BUG' AND r.current_status = 'DEVELOPMENT' THEN '研发负责人'
+				WHEN r.requirement_type = 'BUG' AND r.current_status = 'TESTING' THEN '测试负责人'
+				WHEN r.requirement_type = 'BUG' AND r.current_status = 'PRODUCT_ACCEPTANCE' THEN '验收人'
 				WHEN r.current_status IN ('CREATED', 'PRODUCT_DESIGN', 'PRODUCT_ACCEPTANCE') THEN '产品负责人'
 				WHEN r.current_status IN ('DEV_DESIGN', 'DEVELOPMENT') THEN '研发负责人'
 				WHEN r.current_status IN ('TESTING', 'REGRESSION') THEN '测试负责人'
@@ -139,27 +139,27 @@ func (r *Repository) listWorkspaceTodos(ctx context.Context, userID uint64) ([]W
 		FROM requirements r
 		JOIN projects p ON p.id = r.project_id AND p.status = 'ACTIVE'
 		JOIN project_members pm ON pm.project_id = r.project_id AND pm.user_id = ?
-		WHERE r.closed_at IS NULL
-		  AND r.current_status != 'CLOSED'
+		WHERE r.completed_at IS NULL
+		  AND r.current_status != 'COMPLETED'
 		  AND (
 			-- 普通需求：当前阶段负责人
-			(r.item_type = 'REQUIREMENT'
+			(r.requirement_type = 'REQUIREMENT'
 				AND r.current_status IN ('CREATED', 'PRODUCT_DESIGN', 'PRODUCT_ACCEPTANCE')
 				AND r.created_by = ?)
-			OR (r.item_type = 'REQUIREMENT'
+			OR (r.requirement_type = 'REQUIREMENT'
 				AND r.current_status IN ('DEV_DESIGN', 'DEVELOPMENT')
 				AND (r.developer_user_id = ? OR r.backend_developer_user_id = ?))
-			OR (r.item_type = 'REQUIREMENT'
+			OR (r.requirement_type = 'REQUIREMENT'
 				AND r.current_status IN ('TESTING', 'REGRESSION')
 				AND r.tester_user_id = ?)
 			-- Bug 子项：当前阶段负责人
-			OR (r.item_type = 'BUG'
+			OR (r.requirement_type = 'BUG'
 				AND r.current_status = 'DEVELOPMENT'
 				AND (r.developer_user_id = ? OR r.backend_developer_user_id = ?))
-			OR (r.item_type = 'BUG'
+			OR (r.requirement_type = 'BUG'
 				AND r.current_status = 'TESTING'
 				AND r.tester_user_id = ?)
-			OR (r.item_type = 'BUG'
+			OR (r.requirement_type = 'BUG'
 				AND r.current_status = 'PRODUCT_ACCEPTANCE'
 				AND r.created_by = ?)
 		  )
@@ -202,7 +202,7 @@ func (r *Repository) listWorkspaceActivities(ctx context.Context, userID uint64)
 	statusRows, err := r.db.QueryContext(ctx, `
 		SELECT
 			scl.id,
-			COALESCE(req.item_type, 'REQUIREMENT'),
+			COALESCE(req.requirement_type, 'REQUIREMENT'),
 			req.id,
 			req.requirement_code,
 			req.title,
@@ -213,8 +213,8 @@ func (r *Repository) listWorkspaceActivities(ctx context.Context, userID uint64)
 			COALESCE(scl.remark, ''),
 			scl.operator_user_id,
 			DATE_FORMAT(scl.created_at, '%Y-%m-%dT%H:%i:%sZ')
-		FROM status_change_log scl
-		JOIN requirements req ON req.id = scl.resource_id AND scl.resource_type = 'REQUIREMENT'
+		FROM status_change_logs scl
+		JOIN requirements req ON req.id = scl.requirement_id
 		JOIN projects p ON p.id = req.project_id AND p.status = 'ACTIVE'
 		JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
 		ORDER BY scl.created_at DESC, scl.id DESC
@@ -242,7 +242,7 @@ func (r *Repository) listWorkspaceActivities(ctx context.Context, userID uint64)
 	stageRows, err := r.db.QueryContext(ctx, `
 		SELECT
 			ss.id,
-			COALESCE(req.item_type, 'REQUIREMENT'),
+			COALESCE(req.requirement_type, 'REQUIREMENT'),
 			req.id,
 			req.requirement_code,
 			req.title,
@@ -279,7 +279,7 @@ func (r *Repository) listWorkspaceActivities(ctx context.Context, userID uint64)
 	createRows, err := r.db.QueryContext(ctx, `
 		SELECT
 			req.id,
-			COALESCE(req.item_type, 'REQUIREMENT'),
+			COALESCE(req.requirement_type, 'REQUIREMENT'),
 			req.id,
 			req.requirement_code,
 			req.title,
@@ -427,9 +427,9 @@ func activityTone(status string) string {
 		return "green"
 	case "TESTING", "REGRESSION":
 		return "purple"
-	case "PRODUCT_ACCEPTANCE", "PRODUCT_DESIGN", "CREATED":
+	case "PRODUCT_ACCEPTANCE", "PRODUCT_DESIGN":
 		return "orange"
-	case "CLOSED":
+	case "COMPLETED", "CLOSED":
 		return "red"
 	default:
 		return "blue"
@@ -466,20 +466,16 @@ func (r *Repository) workspaceWeekStats(ctx context.Context, userID uint64) (Wor
 	err := r.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(DISTINCT CASE
-				WHEN scl.resource_type = 'REQUIREMENT'
-					AND COALESCE(req.item_type, 'REQUIREMENT') = 'REQUIREMENT'
-					AND scl.to_status IN ('TESTING', 'PRODUCT_ACCEPTANCE', 'REGRESSION', 'CLOSED')
-				THEN CONCAT(scl.resource_type, ':', scl.resource_id) END),
+				WHEN COALESCE(req.requirement_type, 'REQUIREMENT') = 'REQUIREMENT'
+					AND scl.to_status IN ('TESTING', 'PRODUCT_ACCEPTANCE', 'REGRESSION', 'COMPLETED')
+				THEN scl.requirement_id END),
 			COUNT(DISTINCT CASE
-				WHEN scl.resource_type = 'REQUIREMENT'
-					AND req.item_type = 'BUG'
-					AND scl.to_status = 'CLOSED'
-				THEN CONCAT(scl.resource_type, ':', scl.resource_id) END),
-			COUNT(DISTINCT CASE
-				WHEN scl.resource_type = 'REQUIREMENT'
-				THEN scl.resource_id END)
-		FROM status_change_log scl
-		LEFT JOIN requirements req ON req.id = scl.resource_id
+				WHEN req.requirement_type = 'BUG'
+					AND scl.to_status = 'COMPLETED'
+				THEN scl.requirement_id END),
+			COUNT(DISTINCT scl.requirement_id)
+		FROM status_change_logs scl
+		LEFT JOIN requirements req ON req.id = scl.requirement_id
 		WHERE scl.operator_user_id = ? AND scl.created_at >= ?`,
 		userID, startOfWeek,
 	).Scan(&stats.CompletedTasks, &stats.ClosedBugs, &stats.ParticipatedRequirements)
@@ -488,13 +484,13 @@ func (r *Repository) workspaceWeekStats(ctx context.Context, userID uint64) (Wor
 
 func workspaceStatusLabel(status string) string {
 	labels := map[string]string{
-		"CREATED":            "待产品设计",
 		"PRODUCT_DESIGN":     "产品设计中",
 		"DEV_DESIGN":         "研发方案设计中",
 		"DEVELOPMENT":        "研发处理中",
 		"TESTING":            "测试中",
 		"PRODUCT_ACCEPTANCE": "待产品验收",
 		"REGRESSION":         "回归测试中",
+		"COMPLETED":          "已完成",
 		"CLOSED":             "已关闭",
 	}
 	if label, ok := labels[status]; ok {

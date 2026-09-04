@@ -2,33 +2,33 @@ package domain
 
 import "testing"
 
-func TestNormalizeRequirementDirections(t *testing.T) {
-	got, err := NormalizeRequirementDirections("backend,frontend,backend")
+func TestNormalizeDevelopmentType(t *testing.T) {
+	got, err := NormalizeDevelopmentType("backend")
 	if err != nil {
-		t.Fatalf("normalize directions: %v", err)
+		t.Fatalf("normalize: %v", err)
 	}
-	if got != "FRONTEND,BACKEND" {
+	if got != "BACKEND" {
 		t.Fatalf("got %q", got)
 	}
-	if _, err := NormalizeRequirementDirections("MOBILE"); err == nil {
-		t.Fatal("MOBILE should not be a requirement direction")
+	if _, err := NormalizeDevelopmentType(""); err != nil {
+		t.Fatalf("empty should be allowed: %v", err)
+	}
+	if _, err := NormalizeDevelopmentType("WEB"); err == nil {
+		t.Fatal("invalid type should fail")
 	}
 }
 
 func TestValidateTransitionOperatorByStage(t *testing.T) {
-	if err := ValidateTransitionOperator(1, 1, 2, 3, 4, StageProductDesign); err != nil {
+	if err := ValidateTransitionOperator(1, 1, 2, 4, StageProductDesign); err != nil {
 		t.Fatalf("product owner should operate product design: %v", err)
 	}
-	if err := ValidateTransitionOperator(2, 1, 2, 3, 4, StageDevelopment); err != nil {
-		t.Fatalf("frontend developer should operate development: %v", err)
+	if err := ValidateTransitionOperator(2, 1, 2, 4, StageDevelopment); err != nil {
+		t.Fatalf("developer should operate development: %v", err)
 	}
-	if err := ValidateTransitionOperator(3, 1, 2, 3, 4, StageDevelopment); err != nil {
-		t.Fatalf("backend developer should operate development: %v", err)
-	}
-	if err := ValidateTransitionOperator(4, 1, 2, 3, 4, StageTesting); err != nil {
+	if err := ValidateTransitionOperator(4, 1, 2, 4, StageTesting); err != nil {
 		t.Fatalf("tester should operate testing: %v", err)
 	}
-	if err := ValidateTransitionOperator(5, 1, 2, 3, 4, StageDevelopment); err == nil {
+	if err := ValidateTransitionOperator(5, 1, 2, 4, StageDevelopment); err == nil {
 		t.Fatal("unassigned user should not operate development")
 	}
 }

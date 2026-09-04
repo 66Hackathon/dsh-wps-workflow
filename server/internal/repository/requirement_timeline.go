@@ -3,31 +3,33 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 )
 
 // RequirementStageSubmission is a persisted stage exit record.
 type RequirementStageSubmission struct {
-	ID                  uint64    `json:"id"`
-	RequirementID       uint64    `json:"requirement_id"`
-	StageCode           string    `json:"stage_code"`
-	SpecBody            *string   `json:"spec_body,omitempty"`
-	AcceptanceCriteria  *string   `json:"acceptance_criteria,omitempty"`
-	DevDesignDoc        *string   `json:"dev_design_doc,omitempty"`
-	DevSummary          *string   `json:"dev_summary,omitempty"`
-	ImplementationNotes *string   `json:"implementation_notes,omitempty"`
-	DeveloperUserID     *uint64   `json:"developer_user_id,omitempty"`
-	ReturnReason        *string   `json:"return_reason,omitempty"`
-	TestResult          *string   `json:"test_result,omitempty"`
-	TestSummary         *string   `json:"test_summary,omitempty"`
-	TestCasesCovered    *string   `json:"test_cases_covered,omitempty"`
-	TesterUserID        *uint64   `json:"tester_user_id,omitempty"`
-	AcceptanceNote      *string   `json:"acceptance_note,omitempty"`
-	RegressionResult    *string   `json:"regression_result,omitempty"`
-	RegressionSummary   *string   `json:"regression_summary,omitempty"`
-	OperatorUserID      uint64    `json:"operator_user_id"`
-	OperatorName        string    `json:"operator_name,omitempty"`
-	SubmittedAt         time.Time `json:"submitted_at"`
+	ID             uint64         `json:"id"`
+	RequirementID  uint64         `json:"requirement_id"`
+	StageCode      string         `json:"stage_code"`
+	Result         string         `json:"result,omitempty"`
+	Content        map[string]any `json:"content,omitempty"`
+	OperatorUserID uint64         `json:"operator_user_id"`
+	OperatorName   string         `json:"operator_name,omitempty"`
+	SubmittedAt    time.Time      `json:"submitted_at"`
+
+	// Flattened content keys for older clients.
+	SpecBody            *string `json:"spec_body,omitempty"`
+	AcceptanceCriteria  *string `json:"acceptance_criteria,omitempty"`
+	DevDesignDoc        *string `json:"dev_design_doc,omitempty"`
+	DevSummary          *string `json:"dev_summary,omitempty"`
+	ImplementationNotes *string `json:"implementation_notes,omitempty"`
+	TestResult          *string `json:"test_result,omitempty"`
+	TestSummary         *string `json:"test_summary,omitempty"`
+	AcceptanceNote      *string `json:"acceptance_note,omitempty"`
+	RegressionResult    *string `json:"regression_result,omitempty"`
+	RegressionSummary   *string `json:"regression_summary,omitempty"`
+	Remark              *string `json:"remark,omitempty"`
 }
 
 // StatusChangeLogEntry is one requirement status transition audit record.
@@ -65,16 +67,8 @@ func (r *Repository) ListRequirementTimeline(ctx context.Context, requirementID 
 
 func (r *Repository) listStageSubmissions(ctx context.Context, requirementID uint64) ([]RequirementStageSubmission, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT
-			id, requirement_id, stage_code,
-			spec_body, acceptance_criteria,
-			dev_design_doc,
-			dev_summary, implementation_notes, developer_user_id,
-			return_reason,
-			test_result, test_summary, test_cases_covered, tester_user_id,
-			acceptance_note,
-			regression_result, regression_summary,
-			operator_user_id, submitted_at
+		SELECT id, requirement_id, stage_code, IFNULL(result, ''), content,
+		       operator_user_id, submitted_at
 		FROM requirement_stage_submissions
 		WHERE requirement_id = ?
 		ORDER BY submitted_at ASC, id ASC`, requirementID)
@@ -86,10 +80,18 @@ func (r *Repository) listStageSubmissions(ctx context.Context, requirementID uin
 	items := make([]RequirementStageSubmission, 0)
 	operatorIDs := make([]uint64, 0)
 	for rows.Next() {
-		item, err := scanStageSubmissionRow(rows)
-		if err != nil {
+		var item RequirementStageSubmission
+		var contentRaw []byte
+		if err := rows.Scan(
+			&item.ID, &item.RequirementID, &item.StageCode, &item.Result, &contentRaw,
+			&item.OperatorUserID, &item.SubmittedAt,
+		); err != nil {
 			return nil, err
 		}
+		if len(contentRaw) > 0 {
+			_ = json.Unmarshal(contentRaw, &item.Content)
+		}
+		flattenStageContent(&item)
 		items = append(items, item)
 		operatorIDs = append(operatorIDs, item.OperatorUserID)
 	}
@@ -107,13 +109,44 @@ func (r *Repository) listStageSubmissions(ctx context.Context, requirementID uin
 	return items, nil
 }
 
+func flattenStageContent(item *RequirementStageSubmission) {
+	if item.Content == nil {
+		return
+	}
+	item.SpecBody = contentStringPtr(item.Content, "spec_body")
+	item.AcceptanceCriteria = contentStringPtr(item.Content, "acceptance_criteria")
+	item.DevDesignDoc = contentStringPtr(item.Content, "dev_design_doc")
+	item.DevSummary = contentStringPtr(item.Content, "dev_summary")
+	item.ImplementationNotes = contentStringPtr(item.Content, "implementation_notes")
+	item.TestResult = contentStringPtr(item.Content, "test_result")
+	item.TestSummary = contentStringPtr(item.Content, "test_summary")
+	item.AcceptanceNote = contentStringPtr(item.Content, "acceptance_note")
+	item.RegressionResult = contentStringPtr(item.Content, "regression_result")
+	item.RegressionSummary = contentStringPtr(item.Content, "regression_summary")
+	item.Remark = contentStringPtr(item.Content, "remark")
+}
+
+func contentStringPtr(content map[string]any, key string) *string {
+	raw, ok := content[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch v := raw.(type) {
+	case string:
+		if v == "" {
+			return nil
+		}
+		return &v
+	default:
+		return nil
+	}
+}
+
 func (r *Repository) listRequirementStatusChanges(ctx context.Context, requirementID uint64) ([]StatusChangeLogEntry, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT
-			id, from_status, to_status,
-			operator_user_id, remark, created_at
-		FROM status_change_log
-		WHERE resource_type = 'REQUIREMENT' AND resource_id = ?
+		SELECT id, from_status, to_status, operator_user_id, IFNULL(remark, ''), created_at
+		FROM status_change_logs
+		WHERE requirement_id = ?
 		ORDER BY created_at ASC, id ASC`, requirementID)
 	if err != nil {
 		return nil, err
@@ -124,17 +157,11 @@ func (r *Repository) listRequirementStatusChanges(ctx context.Context, requireme
 	operatorIDs := make([]uint64, 0)
 	for rows.Next() {
 		var item StatusChangeLogEntry
-		var fromStatus sql.NullString
-		if err := rows.Scan(
-			&item.ID, &fromStatus, &item.ToStatus,
-			&item.OperatorUserID, &item.Remark, &item.CreatedAt,
-		); err != nil {
+		var from sql.NullString
+		if err := rows.Scan(&item.ID, &from, &item.ToStatus, &item.OperatorUserID, &item.Remark, &item.CreatedAt); err != nil {
 			return nil, err
 		}
-		if fromStatus.Valid {
-			v := fromStatus.String
-			item.FromStatus = &v
-		}
+		assignNullString(&item.FromStatus, from)
 		items = append(items, item)
 		operatorIDs = append(operatorIDs, item.OperatorUserID)
 	}
@@ -152,47 +179,9 @@ func (r *Repository) listRequirementStatusChanges(ctx context.Context, requireme
 	return items, nil
 }
 
-func scanStageSubmissionRow(row scanner) (RequirementStageSubmission, error) {
-	var item RequirementStageSubmission
-	var specBody, acceptance, devDesignDoc sql.NullString
-	var devSummary, implNotes, returnReason sql.NullString
-	var testResult, testSummary, testCases sql.NullString
-	var acceptanceNote, regressionResult, regressionSummary sql.NullString
-	var developer, tester sql.NullInt64
-
-	err := row.Scan(
-		&item.ID, &item.RequirementID, &item.StageCode,
-		&specBody, &acceptance,
-		&devDesignDoc,
-		&devSummary, &implNotes, &developer,
-		&returnReason,
-		&testResult, &testSummary, &testCases, &tester,
-		&acceptanceNote,
-		&regressionResult, &regressionSummary,
-		&item.OperatorUserID, &item.SubmittedAt,
-	)
-	if err != nil {
-		return RequirementStageSubmission{}, err
-	}
-	assignNullString(&item.SpecBody, specBody)
-	assignNullString(&item.AcceptanceCriteria, acceptance)
-	assignNullString(&item.DevDesignDoc, devDesignDoc)
-	assignNullString(&item.DevSummary, devSummary)
-	assignNullString(&item.ImplementationNotes, implNotes)
-	assignNullString(&item.ReturnReason, returnReason)
-	assignNullString(&item.TestResult, testResult)
-	assignNullString(&item.TestSummary, testSummary)
-	assignNullString(&item.TestCasesCovered, testCases)
-	assignNullString(&item.AcceptanceNote, acceptanceNote)
-	assignNullString(&item.RegressionResult, regressionResult)
-	assignNullString(&item.RegressionSummary, regressionSummary)
-	assignNullUint64(&item.DeveloperUserID, developer)
-	assignNullUint64(&item.TesterUserID, tester)
-	return item, nil
-}
-
 func assignNullString(target **string, value sql.NullString) {
 	if !value.Valid {
+		*target = nil
 		return
 	}
 	v := value.String
@@ -201,6 +190,7 @@ func assignNullString(target **string, value sql.NullString) {
 
 func assignNullUint64(target **uint64, value sql.NullInt64) {
 	if !value.Valid {
+		*target = nil
 		return
 	}
 	v := uint64(value.Int64)

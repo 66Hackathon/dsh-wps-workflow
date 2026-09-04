@@ -3,52 +3,66 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/66hackathon/dsh-wps-workflow/server/internal/domain"
 )
 
-// ProjectMember is a project membership row.
+// ProjectMember is a project membership row. project_members has no role
+// column: role_code / role_codes are synthesized from projects.owner_user_id.
 type ProjectMember struct {
 	ID        uint64   `json:"id"`
+	ProjectID uint64   `json:"project_id"`
 	UserID    uint64   `json:"user_id"`
 	UserName  string   `json:"user_name"`
+	InvitedBy uint64   `json:"invited_by,omitempty"`
+	JoinedAt  string   `json:"joined_at,omitempty"`
 	RoleCode  string   `json:"role_code"`
 	RoleCodes []string `json:"role_codes"`
-	JoinedAt  string   `json:"joined_at,omitempty"`
 }
 
 // ProjectDetail extends Project with members and repositories.
 type ProjectDetail struct {
 	Project
-	OwnerUserID  uint64              `json:"owner_user_id"`
 	Members      []ProjectMember     `json:"members"`
 	Repositories []ProjectRepository `json:"repositories,omitempty"`
+}
+
+const projectSelectColumns = `
+	id, name, IFNULL(description, ''), owner_user_id,
+	IFNULL(wps_group_id, ''), IFNULL(wps_group_name, ''), IFNULL(wps_doc_folder_id, ''),
+	DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ'),
+	DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ')
+`
+
+func scanProject(row scanner, target *Project) error {
+	err := row.Scan(
+		&target.ID, &target.Name, &target.Description, &target.OwnerUserID,
+		&target.WPSGroupID, &target.WPSGroupName, &target.WPSDocFolderID,
+		&target.CreatedAt, &target.UpdatedAt,
+	)
+	if err != nil {
+		return err
+	}
+	target.applyProjectCompatFields()
+	return nil
 }
 
 // GetProject returns a project by id.
 func (r *Repository) GetProject(ctx context.Context, projectID uint64) (ProjectDetail, error) {
 	var detail ProjectDetail
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, project_code, name, IFNULL(description, ''), status, owner_user_id,
-		       IFNULL(wps_group_id, ''), IFNULL(wps_group_name, ''),
-		       created_by,
-		       DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ'),
-		       DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ')
-		FROM projects WHERE id = ? AND status = 'ACTIVE'`, projectID).
-		Scan(&detail.ID, &detail.ProjectCode, &detail.Name, &detail.Description, &detail.Status,
-			&detail.OwnerUserID, &detail.WPSGroupID, &detail.WPSGroupName,
-			&detail.CreatedBy, &detail.CreatedAt, &detail.UpdatedAt)
-	if err != nil {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT `+projectSelectColumns+`
+		FROM projects WHERE id = ?`, projectID)
+	if err := scanProject(row, &detail.Project); err != nil {
 		if err == sql.ErrNoRows {
 			return ProjectDetail{}, fmt.Errorf("project not found")
 		}
 		return ProjectDetail{}, err
 	}
 
-	members, err := r.ListProjectMembers(ctx, projectID)
+	members, err := r.listProjectMembers(ctx, projectID, detail.OwnerUserID)
 	if err != nil {
 		return ProjectDetail{}, err
 	}
@@ -66,10 +80,32 @@ func (r *Repository) GetProject(ctx context.Context, projectID uint64) (ProjectD
 	return detail, nil
 }
 
-// ListProjectMembers returns members for a project.
+// ProjectOwnerUserID returns projects.owner_user_id.
+func (r *Repository) ProjectOwnerUserID(ctx context.Context, projectID uint64) (uint64, error) {
+	var ownerUserID uint64
+	err := r.db.QueryRowContext(ctx,
+		`SELECT owner_user_id FROM projects WHERE id = ?`, projectID).Scan(&ownerUserID)
+	if err == sql.ErrNoRows {
+		return 0, fmt.Errorf("project not found")
+	}
+	if err != nil {
+		return 0, err
+	}
+	return ownerUserID, nil
+}
+
+// ListProjectMembers returns members for a project with synthesized role tags.
 func (r *Repository) ListProjectMembers(ctx context.Context, projectID uint64) ([]ProjectMember, error) {
+	ownerUserID, err := r.ProjectOwnerUserID(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return r.listProjectMembers(ctx, projectID, ownerUserID)
+}
+
+func (r *Repository) listProjectMembers(ctx context.Context, projectID, ownerUserID uint64) ([]ProjectMember, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, user_id, role_code, role_codes,
+		SELECT id, project_id, user_id, invited_by,
 		       DATE_FORMAT(joined_at, '%Y-%m-%d')
 		FROM project_members
 		WHERE project_id = ?
@@ -83,11 +119,11 @@ func (r *Repository) ListProjectMembers(ctx context.Context, projectID uint64) (
 	userIDs := make([]uint64, 0)
 	for rows.Next() {
 		var item ProjectMember
-		var roleCodesJSON []byte
-		if err := rows.Scan(&item.ID, &item.UserID, &item.RoleCode, &roleCodesJSON, &item.JoinedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.UserID, &item.InvitedBy, &item.JoinedAt); err != nil {
 			return nil, err
 		}
-		item.RoleCodes = decodeRoleCodes(roleCodesJSON, item.RoleCode)
+		item.RoleCodes = domain.SynthesizeRoleCodes(ownerUserID, item.UserID)
+		item.RoleCode = domain.PrimaryRoleCode(item.RoleCodes)
 		items = append(items, item)
 		userIDs = append(userIDs, item.UserID)
 	}
@@ -114,7 +150,7 @@ func (r *Repository) attachProjectListExtras(ctx context.Context, projects []Pro
 		byID[projects[i].ID] = &projects[i]
 	}
 	for i := range projects {
-		members, err := r.ListProjectMembers(ctx, projects[i].ID)
+		members, err := r.listProjectMembers(ctx, projects[i].ID, projects[i].OwnerUserID)
 		if err != nil {
 			return err
 		}
@@ -123,10 +159,10 @@ func (r *Repository) attachProjectListExtras(ctx context.Context, projects []Pro
 
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT project_id,
-		       SUM(CASE WHEN item_type = 'BUG' THEN 1 ELSE 0 END),
-		       SUM(CASE WHEN item_type = 'REQUIREMENT' THEN 1 ELSE 0 END)
+		       SUM(CASE WHEN requirement_type = 'BUG' THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN requirement_type = 'REQUIREMENT' THEN 1 ELSE 0 END)
 		FROM requirements
-		WHERE closed_at IS NULL AND project_id IN (`+placeholders(len(ids))+`)
+		WHERE current_status <> 'COMPLETED' AND project_id IN (`+placeholders(len(ids))+`)
 		GROUP BY project_id`, uint64Args(ids)...)
 	if err != nil {
 		return err
@@ -150,10 +186,10 @@ func (r *Repository) projectItemCounts(ctx context.Context, projectID uint64) (i
 	var reqCount, bugCount int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT
-		  COALESCE(SUM(CASE WHEN item_type = 'REQUIREMENT' THEN 1 ELSE 0 END), 0),
-		  COALESCE(SUM(CASE WHEN item_type = 'BUG' THEN 1 ELSE 0 END), 0)
+		  COALESCE(SUM(CASE WHEN requirement_type = 'REQUIREMENT' THEN 1 ELSE 0 END), 0),
+		  COALESCE(SUM(CASE WHEN requirement_type = 'BUG' THEN 1 ELSE 0 END), 0)
 		FROM requirements
-		WHERE project_id = ? AND closed_at IS NULL`, projectID).
+		WHERE project_id = ? AND current_status <> 'COMPLETED'`, projectID).
 		Scan(&reqCount, &bugCount)
 	if err != nil {
 		return 0, 0, err
@@ -161,45 +197,19 @@ func (r *Repository) projectItemCounts(ctx context.Context, projectID uint64) (i
 	return reqCount, bugCount, nil
 }
 
-func decodeRoleCodes(raw []byte, fallbackRole string) []string {
-	if len(raw) == 0 {
-		return legacyRoleToUI(fallbackRole)
-	}
-	var codes []string
-	if err := json.Unmarshal(raw, &codes); err != nil || len(codes) == 0 {
-		return legacyRoleToUI(fallbackRole)
-	}
-	return codes
-}
-
-func legacyRoleToUI(roleCode string) []string {
-	switch roleCode {
-	case "PROJECT_ADMIN":
-		return []string{domain.UIRoleProjectAdmin}
-	default:
-		return []string{domain.UIRoleMember}
-	}
-}
-
-func encodeRoleCodes(codes []string) (string, error) {
-	raw, err := json.Marshal(codes)
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
-}
-
 // CreateProjectInput holds fields for creating a project.
 type CreateProjectInput struct {
-	ProjectCode string
 	Name        string
 	Description string
 	OwnerUserID uint64
-	CreatedBy   uint64
 }
 
 // CreateProject inserts a new project and owner membership. Returns the new project id.
 func (r *Repository) CreateProject(ctx context.Context, input CreateProjectInput) (uint64, error) {
+	if err := domain.ValidateProjectCreate(input.Name, input.Description, input.OwnerUserID); err != nil {
+		return 0, err
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -207,9 +217,9 @@ func (r *Repository) CreateProject(ctx context.Context, input CreateProjectInput
 	defer func() { _ = tx.Rollback() }()
 
 	result, err := tx.ExecContext(ctx, `
-		INSERT INTO projects (project_code, name, description, owner_user_id, status, setup_status, created_by)
-		VALUES (?, ?, ?, ?, 'ACTIVE', 'ACTIVE', ?)`,
-		input.ProjectCode, input.Name, input.Description, input.OwnerUserID, input.CreatedBy)
+		INSERT INTO projects (name, description, owner_user_id)
+		VALUES (?, ?, ?)`,
+		strings.TrimSpace(input.Name), nullIfEmptyString(input.Description), input.OwnerUserID)
 	if err != nil {
 		return 0, err
 	}
@@ -219,9 +229,9 @@ func (r *Repository) CreateProject(ctx context.Context, input CreateProjectInput
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO project_members (project_id, user_id, role_code, role_codes, invited_by)
-		VALUES (?, ?, 'PROJECT_ADMIN', JSON_ARRAY('PROJECT_ADMIN'), ?)`,
-		insertedID, input.OwnerUserID, input.CreatedBy)
+		INSERT INTO project_members (project_id, user_id, invited_by)
+		VALUES (?, ?, ?)`,
+		insertedID, input.OwnerUserID, input.OwnerUserID)
 	if err != nil {
 		return 0, err
 	}
@@ -233,53 +243,50 @@ func (r *Repository) CreateProject(ctx context.Context, input CreateProjectInput
 	return uint64(insertedID), nil
 }
 
-// GetProjectMemberRole returns the role_code for a user in a project, or empty if not a member.
+// GetProjectMemberRole returns the synthesized role_code for a user in a
+// project, or empty if the user is not a member.
 func (r *Repository) GetProjectMemberRole(ctx context.Context, projectID, userID uint64) (string, error) {
-	var roleCode string
-	err := r.db.QueryRowContext(ctx, `
-		SELECT role_code FROM project_members
-		WHERE project_id = ? AND user_id = ?`, projectID, userID).Scan(&roleCode)
+	ownerUserID, err := r.ProjectOwnerUserID(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	var one int
+	err = r.db.QueryRowContext(ctx, `
+		SELECT 1 FROM project_members
+		WHERE project_id = ? AND user_id = ? LIMIT 1`, projectID, userID).Scan(&one)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
 	}
-	return roleCode, nil
+	return domain.PrimaryRoleCode(domain.SynthesizeRoleCodes(ownerUserID, userID)), nil
 }
 
-// MemberCanManageProject reports whether the user can manage project members.
+// MemberCanManageProject reports whether the user can manage the project.
+// Only projects.owner_user_id may manage members, repositories and settings.
 func (r *Repository) MemberCanManageProject(ctx context.Context, projectID, userID uint64) (bool, error) {
-	members, err := r.ListProjectMembers(ctx, projectID)
+	ownerUserID, err := r.ProjectOwnerUserID(ctx, projectID)
 	if err != nil {
 		return false, err
 	}
-	for _, m := range members {
-		if m.UserID != userID {
-			continue
-		}
-		for _, code := range m.RoleCodes {
-			if code == domain.UIRoleProjectAdmin {
-				return true, nil
-			}
-		}
-		if m.RoleCode == "PROJECT_ADMIN" {
-			return true, nil
-		}
-	}
-	return false, nil
+	return domain.MemberCanManage(ownerUserID, userID), nil
 }
 
 // AddProjectMemberInput holds fields for adding a project member.
 type AddProjectMemberInput struct {
 	ProjectID uint64
 	UserID    uint64
-	RoleCodes []string
 	InvitedBy uint64
 }
 
-// AddProjectMember inserts a membership and may complete the ADD_MEMBERS setup step.
+// AddProjectMember inserts a membership row.
 func (r *Repository) AddProjectMember(ctx context.Context, input AddProjectMemberInput) (ProjectMember, error) {
+	ownerUserID, err := r.ProjectOwnerUserID(ctx, input.ProjectID)
+	if err != nil {
+		return ProjectMember{}, err
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return ProjectMember{}, err
@@ -298,10 +305,9 @@ func (r *Repository) AddProjectMember(ctx context.Context, input AddProjectMembe
 	}
 
 	result, err := tx.ExecContext(ctx, `
-		INSERT INTO project_members (project_id, user_id, role_code, role_codes, invited_by)
-		VALUES (?, ?, ?, CAST(? AS JSON), ?)`,
-		input.ProjectID, input.UserID, domain.PrimaryRoleCode(input.RoleCodes),
-		mustEncodeRoleCodes(input.RoleCodes), input.InvitedBy)
+		INSERT INTO project_members (project_id, user_id, invited_by)
+		VALUES (?, ?, ?)`,
+		input.ProjectID, input.UserID, input.InvitedBy)
 	if err != nil {
 		return ProjectMember{}, err
 	}
@@ -311,9 +317,7 @@ func (r *Repository) AddProjectMember(ctx context.Context, input AddProjectMembe
 	}
 
 	var userName string
-	err = tx.QueryRowContext(ctx, `
-		SELECT name FROM users WHERE id = ?`, input.UserID).
-		Scan(&userName)
+	err = tx.QueryRowContext(ctx, `SELECT name FROM users WHERE id = ?`, input.UserID).Scan(&userName)
 	if err != nil {
 		return ProjectMember{}, err
 	}
@@ -322,44 +326,20 @@ func (r *Repository) AddProjectMember(ctx context.Context, input AddProjectMembe
 		return ProjectMember{}, err
 	}
 
+	roleCodes := domain.SynthesizeRoleCodes(ownerUserID, input.UserID)
 	return ProjectMember{
 		ID:        uint64(memberID),
+		ProjectID: input.ProjectID,
 		UserID:    input.UserID,
 		UserName:  userName,
-		RoleCode:  domain.PrimaryRoleCode(input.RoleCodes),
-		RoleCodes: append([]string(nil), input.RoleCodes...),
+		InvitedBy: input.InvitedBy,
+		RoleCode:  domain.PrimaryRoleCode(roleCodes),
+		RoleCodes: roleCodes,
 	}, nil
 }
 
-func mustEncodeRoleCodes(codes []string) string {
-	raw, err := encodeRoleCodes(codes)
-	if err != nil {
-		return "[]"
-	}
-	return raw
-}
-
-// UpdateProjectMemberRoles changes a member's UI role tags.
-func (r *Repository) UpdateProjectMemberRoles(ctx context.Context, projectID, memberID uint64, roleCodes []string) (ProjectMember, error) {
-	encoded, err := encodeRoleCodes(roleCodes)
-	if err != nil {
-		return ProjectMember{}, err
-	}
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE project_members SET role_code = ?, role_codes = CAST(? AS JSON)
-		WHERE id = ? AND project_id = ?`,
-		domain.PrimaryRoleCode(roleCodes), encoded, memberID, projectID)
-	if err != nil {
-		return ProjectMember{}, err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return ProjectMember{}, err
-	}
-	if affected == 0 {
-		return ProjectMember{}, fmt.Errorf("member not found")
-	}
-
+// GetProjectMember returns a single membership row.
+func (r *Repository) GetProjectMember(ctx context.Context, projectID, memberID uint64) (ProjectMember, error) {
 	members, err := r.ListProjectMembers(ctx, projectID)
 	if err != nil {
 		return ProjectMember{}, err
@@ -372,20 +352,23 @@ func (r *Repository) UpdateProjectMemberRoles(ctx context.Context, projectID, me
 	return ProjectMember{}, fmt.Errorf("member not found")
 }
 
-// RemoveProjectMember deletes a membership if not the sole product owner.
+// RemoveProjectMember deletes a membership. The project owner cannot be removed.
 func (r *Repository) RemoveProjectMember(ctx context.Context, projectID, memberID uint64) error {
+	ownerUserID, err := r.ProjectOwnerUserID(ctx, projectID)
+	if err != nil {
+		return err
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var roleCode string
 	var userID uint64
 	err = tx.QueryRowContext(ctx, `
-		SELECT role_code, user_id FROM project_members
-		WHERE id = ? AND project_id = ?`, memberID, projectID).
-		Scan(&roleCode, &userID)
+		SELECT user_id FROM project_members
+		WHERE id = ? AND project_id = ?`, memberID, projectID).Scan(&userID)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("member not found")
 	}
@@ -393,18 +376,8 @@ func (r *Repository) RemoveProjectMember(ctx context.Context, projectID, memberI
 		return err
 	}
 
-	if roleCode == "PROJECT_ADMIN" {
-		var adminCount int
-		err = tx.QueryRowContext(ctx, `
-			SELECT COUNT(*) FROM project_members
-			WHERE project_id = ? AND role_code = 'PROJECT_ADMIN'`, projectID).
-			Scan(&adminCount)
-		if err != nil {
-			return err
-		}
-		if adminCount <= 1 {
-			return fmt.Errorf("cannot remove the sole project manager")
-		}
+	if userID == ownerUserID {
+		return fmt.Errorf("cannot remove the sole project manager")
 	}
 
 	if err := clearMemberAssignments(ctx, tx, projectID, userID); err != nil {
@@ -427,48 +400,49 @@ func (r *Repository) RemoveProjectMember(ctx context.Context, projectID, memberI
 	return tx.Commit()
 }
 
-// UpdateProjectSetupInput holds optional project setup fields.
+// UpdateProjectSetupInput holds optional project fields.
 type UpdateProjectSetupInput struct {
-	Name         *string
-	Description  *string
-	WPSGroupID   *string
-	WPSGroupName *string
+	Name           *string
+	Description    *string
+	WPSGroupID     *string
+	WPSGroupName   *string
+	WPSDocFolderID *string
 }
 
-// UpdateProjectSetup updates project basic info and optional repository/group fields.
+// UpdateProjectSetup updates project basic info and optional WPS binding fields.
 func (r *Repository) UpdateProjectSetup(ctx context.Context, projectID uint64, input UpdateProjectSetupInput) (ProjectDetail, error) {
+	assignments := make([]string, 0, 5)
+	args := make([]any, 0, 6)
+
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
 		if name == "" {
 			return ProjectDetail{}, fmt.Errorf("name is required")
 		}
-		_, err := r.db.ExecContext(ctx, `
-			UPDATE projects SET name = ? WHERE id = ? AND status = 'ACTIVE'`,
-			name, projectID)
-		if err != nil {
-			return ProjectDetail{}, err
-		}
+		assignments = append(assignments, "name = ?")
+		args = append(args, name)
 	}
 	if input.Description != nil {
-		_, err := r.db.ExecContext(ctx, `
-			UPDATE projects SET description = ? WHERE id = ? AND status = 'ACTIVE'`,
-			nullIfEmptyString(*input.Description), projectID)
-		if err != nil {
-			return ProjectDetail{}, err
-		}
+		assignments = append(assignments, "description = ?")
+		args = append(args, nullIfEmptyString(*input.Description))
 	}
 	if input.WPSGroupID != nil {
-		_, err := r.db.ExecContext(ctx, `
-			UPDATE projects SET wps_group_id = ? WHERE id = ? AND status = 'ACTIVE'`,
-			nullIfEmptyString(*input.WPSGroupID), projectID)
-		if err != nil {
-			return ProjectDetail{}, err
-		}
+		assignments = append(assignments, "wps_group_id = ?")
+		args = append(args, nullIfEmptyString(*input.WPSGroupID))
 	}
 	if input.WPSGroupName != nil {
-		_, err := r.db.ExecContext(ctx, `
-			UPDATE projects SET wps_group_name = ? WHERE id = ? AND status = 'ACTIVE'`,
-			nullIfEmptyString(*input.WPSGroupName), projectID)
+		assignments = append(assignments, "wps_group_name = ?")
+		args = append(args, nullIfEmptyString(*input.WPSGroupName))
+	}
+	if input.WPSDocFolderID != nil {
+		assignments = append(assignments, "wps_doc_folder_id = ?")
+		args = append(args, nullIfEmptyString(*input.WPSDocFolderID))
+	}
+
+	if len(assignments) > 0 {
+		args = append(args, projectID)
+		_, err := r.db.ExecContext(ctx,
+			`UPDATE projects SET `+strings.Join(assignments, ", ")+` WHERE id = ?`, args...)
 		if err != nil {
 			return ProjectDetail{}, err
 		}

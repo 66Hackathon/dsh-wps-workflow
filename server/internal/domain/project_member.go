@@ -5,34 +5,42 @@ import (
 	"slices"
 )
 
-// UI role codes stored in project_members.role_codes JSON.
+// project_members has no role column: the project administrator is
+// projects.owner_user_id and everybody else is a plain member. The UI role
+// codes below are still synthesized in API responses for client compatibility.
 const (
 	UIRoleProjectAdmin = "PROJECT_ADMIN"
 	UIRoleMember       = "MEMBER"
 )
 
-// ValidUIRoles lists assignable member role tags in the UI.
+// ValidUIRoles lists the synthesized member role tags exposed to the UI.
 var ValidUIRoles = []string{
 	UIRoleProjectAdmin,
 	UIRoleMember,
 }
 
-// CreatorUIRoles is applied to the project creator (manager only).
+// CreatorUIRoles is reported for the project owner.
 var CreatorUIRoles = []string{UIRoleProjectAdmin}
 
-// AssignableUIRoles for manually added members.
+// AssignableUIRoles is reported for every other member.
 var AssignableUIRoles = []string{UIRoleMember}
 
-// Legacy single role_code values (kept for compatibility queries).
-var ValidProjectRoles = []string{
-	"PROJECT_ADMIN",
-	"PRODUCT_OWNER",
-	"DEVELOPER",
-	"TESTER",
-	"MEMBER",
+// MemberCanManage reports whether a user may manage the project
+// (members, repositories, settings). Only the project owner can.
+func MemberCanManage(ownerUserID, userID uint64) bool {
+	return ownerUserID != 0 && ownerUserID == userID
+}
+
+// SynthesizeRoleCodes derives the UI role tags for a member from project ownership.
+func SynthesizeRoleCodes(ownerUserID, userID uint64) []string {
+	if MemberCanManage(ownerUserID, userID) {
+		return append([]string(nil), CreatorUIRoles...)
+	}
+	return append([]string(nil), AssignableUIRoles...)
 }
 
 // ValidateUIRoles ensures each role is allowed and at least one is present.
+// Roles are not persisted; this only guards legacy request payloads.
 func ValidateUIRoles(roleCodes []string, isCreator bool) error {
 	if len(roleCodes) == 0 {
 		return fmt.Errorf("请至少选择一个项目角色")
@@ -55,35 +63,22 @@ func ValidateUIRoles(roleCodes []string, isCreator bool) error {
 	return nil
 }
 
-// ValidateAddProjectMember validates input for adding a member.
+// ValidateAddProjectMember validates input for adding a member. Role codes are
+// accepted for backwards compatibility but never persisted.
 func ValidateAddProjectMember(userID uint64, roleCodes []string) error {
 	if userID == 0 {
 		return fmt.Errorf("user_id is required")
 	}
 	if len(roleCodes) == 0 {
-		roleCodes = []string{UIRoleMember}
+		return nil
 	}
 	return ValidateUIRoles(roleCodes, false)
 }
 
-// PrimaryRoleCode derives legacy role_code from UI role tags.
+// PrimaryRoleCode derives the legacy single role_code from UI role tags.
 func PrimaryRoleCode(roleCodes []string) string {
-	if len(roleCodes) == 0 {
-		return "MEMBER"
-	}
 	if slices.Contains(roleCodes, UIRoleProjectAdmin) {
-		return "PROJECT_ADMIN"
+		return UIRoleProjectAdmin
 	}
-	return "MEMBER"
-}
-
-// ValidateProjectRole ensures legacy role_code is allowed.
-func ValidateProjectRole(roleCode string) error {
-	if roleCode == "" {
-		return fmt.Errorf("role_code is required")
-	}
-	if !slices.Contains(ValidProjectRoles, roleCode) {
-		return fmt.Errorf("invalid role_code: %s", roleCode)
-	}
-	return nil
+	return UIRoleMember
 }
