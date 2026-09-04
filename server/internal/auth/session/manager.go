@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -65,15 +66,20 @@ type UserProfile struct {
 type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Record
-	states   map[string]time.Time
+	states   map[string]stateEntry
 	store    SessionStore
+}
+
+type stateEntry struct {
+	ExpiresAt time.Time
+	ReturnTo  string
 }
 
 // NewManager returns a session manager with in-memory sessions only.
 func NewManager() *Manager {
 	return &Manager{
 		sessions: make(map[string]*Record),
-		states:   make(map[string]time.Time),
+		states:   make(map[string]stateEntry),
 	}
 }
 
@@ -85,33 +91,38 @@ func NewManagerWithStore(store SessionStore) *Manager {
 }
 
 // CreateState mints a CSRF state value valid for ten minutes.
-func (m *Manager) CreateState() (string, error) {
+// returnTo is the frontend origin to redirect after OAuth (optional).
+func (m *Manager) CreateState(returnTo string) (string, error) {
 	state, err := randomToken(16)
 	if err != nil {
 		return "", err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.states[state] = time.Now().Add(10 * time.Minute)
+	m.states[state] = stateEntry{
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+		ReturnTo:  strings.TrimRight(strings.TrimSpace(returnTo), "/"),
+	}
 	m.cleanupLocked(time.Now())
 	return state, nil
 }
 
 // ConsumeState validates and removes a CSRF state value.
-func (m *Manager) ConsumeState(state string) bool {
+// It returns the associated frontend return URL when present.
+func (m *Manager) ConsumeState(state string) (returnTo string, ok bool) {
 	if state == "" {
-		return false
+		return "", false
 	}
 	now := time.Now()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	expiresAt, ok := m.states[state]
-	if !ok || now.After(expiresAt) {
+	entry, exists := m.states[state]
+	if !exists || now.After(entry.ExpiresAt) {
 		delete(m.states, state)
-		return false
+		return "", false
 	}
 	delete(m.states, state)
-	return true
+	return entry.ReturnTo, true
 }
 
 // CreateSession stores a new system session and returns its token id.
@@ -191,8 +202,8 @@ func (m *Manager) Delete(id string) {
 }
 
 func (m *Manager) cleanupLocked(now time.Time) {
-	for state, expiresAt := range m.states {
-		if now.After(expiresAt) {
+	for state, entry := range m.states {
+		if now.After(entry.ExpiresAt) {
 			delete(m.states, state)
 		}
 	}

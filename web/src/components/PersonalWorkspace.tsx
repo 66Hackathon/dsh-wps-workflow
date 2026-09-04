@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { formatRelativeFromISO } from '../projectDisplay';
-import { REQUIREMENT_STATUS_LABELS, type WorkspaceItem, type WorkspaceSummary } from '../types';
+import {
+  REQUIREMENT_STATUS_LABELS,
+  type WorkspaceActivity,
+  type WorkspaceItem,
+  type WorkspaceSummary,
+} from '../types';
 
 type TodoFilter = 'all' | 'product' | 'development' | 'testing' | 'bug';
 
 const EMPTY_SUMMARY: WorkspaceSummary = {
   todos: [],
   following: [],
+  activities: [],
   reminders: [],
   week: {
     completed_tasks: 0,
@@ -115,8 +121,9 @@ export function PersonalWorkspace({
     [summary.todos, filter],
   );
   const visibleTodos = showAll ? filtered : filtered.slice(0, 4);
+  const activities = summary.activities?.length ? summary.activities : summary.following;
   const processing = summary.todos.filter((item) =>
-    ['DEVELOPMENT', 'TESTING', 'BUG_FIXING', 'IN_PROGRESS'].includes(item.status)).length;
+    ['DEV_DESIGN', 'DEVELOPMENT', 'TESTING', 'REGRESSION', 'PRODUCT_ACCEPTANCE'].includes(item.status)).length;
   const dueSoon = summary.todos.filter((item) => item.due_soon).length;
   const overdue = summary.todos.filter((item) => item.overdue).length;
 
@@ -195,8 +202,9 @@ export function PersonalWorkspace({
 
           <div className="tsw-workspaceBottomGrid">
             <section className="tsw-card tsw-workspacePanel">
-              <h3>我的关注</h3>
-              <WorkspaceItemTable items={summary.following.slice(0, 5)} onOpenProject={onOpenProject} />
+              <h3>我的关注 <span className="tsw-workspaceHeadingCount">{activities.length}</span></h3>
+              <p className="tsw-muted tsw-workspacePanelHint">你参与项目中的最新流转动态</p>
+              <WorkspaceActivityFeed items={activities.slice(0, 8)} onOpenProject={onOpenProject} />
             </section>
 
             <section className="tsw-card tsw-workspacePanel">
@@ -249,7 +257,7 @@ function WorkspaceItemTable({
   onOpenProject: (projectId: number) => void;
   showRole?: boolean;
 }) {
-  if (!items.length) return <WorkspaceEmpty text="暂无相关事项" />;
+  if (!items.length) return <WorkspaceEmpty text="暂无流转到你负责阶段的事项" />;
   return (
     <div className="tsw-workspaceTableWrap">
       <table className="tsw-workspaceTable">
@@ -257,8 +265,8 @@ function WorkspaceItemTable({
           <tr>
             <th>类型 / 标题</th>
             <th>项目</th>
-            {showRole ? <th>角色</th> : <th>最新动态</th>}
-            <th>{showRole ? '状态' : '更新时间'}</th>
+            {showRole ? <th>我的角色</th> : null}
+            <th>当前阶段</th>
             {showRole ? <th>截止时间</th> : null}
             <th />
           </tr>
@@ -271,11 +279,9 @@ function WorkspaceItemTable({
                 <strong>{item.code} · {item.title}</strong>
               </td>
               <td>{item.project_name}</td>
-              {showRole ? <td>{item.role}</td> : <td>{statusLabel(item.status)}</td>}
+              {showRole ? <td>{item.role}</td> : null}
               <td>
-                {showRole ? (
-                  <span className="tsw-workspaceStatus" data-status={item.status}>{statusLabel(item.status)}</span>
-                ) : formatRelativeFromISO(item.updated_at)}
+                <span className="tsw-workspaceStatus" data-status={item.status}>{statusLabel(item.status)}</span>
               </td>
               {showRole ? (
                 <td data-overdue={item.overdue ? 'true' : 'false'}>{dueLabel(item)}</td>
@@ -290,6 +296,45 @@ function WorkspaceItemTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function activityDotClass(tone?: string): string {
+  const safe = tone && ['blue', 'green', 'orange', 'purple', 'red'].includes(tone) ? tone : 'blue';
+  return `tsw-overviewActivityDot tsw-overviewActivityDot--${safe}`;
+}
+
+function WorkspaceActivityFeed({
+  items,
+  onOpenProject,
+}: {
+  items: WorkspaceActivity[];
+  onOpenProject: (projectId: number) => void;
+}) {
+  if (!items.length) return <WorkspaceEmpty text="暂无项目动态" />;
+  return (
+    <ul className="tsw-overviewActivityList tsw-workspaceActivityList">
+      {items.map((item) => (
+        <li key={`${item.kind}-${item.id}-${item.occurred_at}`}>
+          <button
+            type="button"
+            className="tsw-workspaceActivityItem"
+            onClick={() => onOpenProject(item.project_id)}
+          >
+            <i className={activityDotClass(item.tone)} />
+            <div>
+              <p>{item.text}</p>
+              <span className="tsw-muted">
+                {item.project_name}
+                {item.code ? ` · ${item.code}` : ''}
+                {' · '}
+                {formatRelativeFromISO(item.occurred_at)}
+              </span>
+            </div>
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

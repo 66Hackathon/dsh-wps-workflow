@@ -29,6 +29,7 @@ export interface LoginInitResponse {
   client_id: string;
   state: string;
   redirect_url: string;
+  return_to?: string;
 }
 
 export interface Project {
@@ -193,9 +194,29 @@ export interface WorkspaceReminder {
   unread: boolean;
 }
 
+/** 工作区「我的关注」：我参与项目中的流转动态 */
+export interface WorkspaceActivity {
+  id: number;
+  kind: 'STATUS_CHANGE' | 'STAGE_SUBMIT' | 'CREATE' | string;
+  type: 'REQUIREMENT' | 'BUG' | string;
+  resource_id: number;
+  code: string;
+  title: string;
+  project_id: number;
+  project_name: string;
+  text: string;
+  from_status?: string;
+  to_status?: string;
+  operator_name: string;
+  occurred_at: string;
+  tone?: 'blue' | 'green' | 'orange' | 'purple' | 'red' | string;
+}
+
 export interface WorkspaceSummary {
   todos: WorkspaceItem[];
-  following: WorkspaceItem[];
+  /** @deprecated 使用 activities；后端仍填充以兼容旧客户端 */
+  following: WorkspaceActivity[];
+  activities?: WorkspaceActivity[];
   reminders: WorkspaceReminder[];
   week: {
     completed_tasks: number;

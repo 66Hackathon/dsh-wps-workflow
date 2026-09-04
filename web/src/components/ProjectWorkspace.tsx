@@ -84,21 +84,43 @@ export function ProjectWorkspace({
     if (loadReqs) setLoadingRequirements(true);
 
     void api.listRequirements(project.id).then(
-      (res) => { if (!cancelled) setRequirements(res.items ?? []); },
-      () => { if (!cancelled) setRequirements([]); },
+      (res) => {
+        if (cancelled) return;
+        const items = res.items ?? [];
+        setRequirements(items);
+        // Bug 已并入 requirements（item_type=BUG），概览统计直接从需求列表推导
+        setBugs(
+          items
+            .filter((item) => item.item_type === 'BUG' || item.development_scope === 'BUG_FIX')
+            .map((item) => ({
+              id: item.id,
+              project_id: item.project_id,
+              requirement_id: item.parent_item_id ?? item.parent_requirement_id ?? item.id,
+              bug_code: item.requirement_code,
+              title: item.title,
+              description: item.description ?? '',
+              steps_to_reproduce: '',
+              environment: '',
+              severity: item.priority,
+              status: item.current_status === 'CLOSED' ? 'CLOSED' : 'OPEN',
+              found_in_status: '',
+              assignee_user_id: item.developer_user_id,
+              fix_requirement_id: item.id,
+            })),
+        );
+      },
+      () => {
+        if (!cancelled) {
+          setRequirements([]);
+          setBugs([]);
+        }
+      },
     ).finally(() => {
       if (!cancelled) {
         if (tab === 'overview') setLoadingOverview(false);
         if (loadReqs) setLoadingRequirements(false);
       }
     });
-
-    if (tab === 'overview') {
-      void api.listBugs(project.id).then(
-        (res) => { if (!cancelled) setBugs(res.items ?? []); },
-        () => { if (!cancelled) setBugs([]); },
-      );
-    }
 
     return () => { cancelled = true; };
   }, [project.id, tab, showSettings]);

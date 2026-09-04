@@ -47,7 +47,8 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state, err := h.deps.Sessions.CreateState()
+	returnTo := resolveFrontendReturnTo(r, h.deps.Config.Auth.FrontendRedirectURL)
+	state, err := h.deps.Sessions.CreateState(returnTo)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error":   "state_create_failed",
@@ -69,64 +70,67 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		"client_id":    h.deps.Config.WPS.ClientID,
 		"state":        state,
 		"redirect_url": authURL,
+		"return_to":    returnTo,
 	})
 }
 
 // HandleCallback completes OAuth, persists the user, and redirects with a system token.
 func (h *AuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	if !h.deps.Config.OAuthConfigured() {
-		h.redirectWithError(w, r, "WPS OAuth 未配置")
+		h.redirectWithError(w, r, "", "WPS OAuth 未配置")
 		return
 	}
 
 	if errCode := r.URL.Query().Get("error"); errCode != "" {
 		desc := r.URL.Query().Get("error_description")
-		h.redirectWithError(w, r, fmt.Sprintf("%s: %s", errCode, desc))
+		h.redirectWithError(w, r, "", fmt.Sprintf("%s: %s", errCode, desc))
 		return
 	}
 
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
 	if code == "" {
-		h.redirectWithError(w, r, "missing authorization code")
+		h.redirectWithError(w, r, "", "missing authorization code")
 		return
 	}
-	if state == "" || !h.deps.Sessions.ConsumeState(state) {
+	returnTo, ok := h.deps.Sessions.ConsumeState(state)
+	if state == "" || !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error":   "invalid_state",
 			"message": "OAuth state mismatch or expired",
 		})
 		return
 	}
+	frontendBase := h.frontendRedirectURL(returnTo)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
 	token, err := h.deps.WPS.ExchangeCode(ctx, code)
 	if err != nil {
-		h.redirectWithError(w, r, "token exchange failed: "+err.Error())
+		h.redirectWithError(w, r, frontendBase, "token exchange failed: "+err.Error())
 		return
 	}
 
 	profile, err := h.deps.WPS.CurrentUser(ctx, token.AccessToken)
 	if err != nil {
-		h.redirectWithError(w, r, "load user profile failed: "+err.Error())
+		h.redirectWithError(w, r, frontendBase, "load user profile failed: "+err.Error())
 		return
 	}
 
 	user, err := h.deps.Repo.UpsertWPSUser(ctx, profile, token)
 	if err != nil {
-		h.redirectWithError(w, r, "persist user failed: "+err.Error())
+		h.redirectWithError(w, r, frontendBase, "persist user failed: "+err.Error())
 		return
 	}
 
 	sessionID, _, err := h.deps.Sessions.CreateSession(repositoryUserToSessionUser(user), systemSessionTTL)
 	if err != nil {
-		h.redirectWithError(w, r, "create session failed: "+err.Error())
+		h.redirectWithError(w, r, frontendBase, "create session failed: "+err.Error())
 		return
 	}
 
-	redirectURL := h.frontendRedirectURL() + "?" + url.Values{"token": {sessionID}}.Encode()
+	redirectURL := frontendBase + "?" + url.Values{"token": {sessionID}}.Encode()
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
@@ -306,15 +310,76 @@ func (h *AuthHandler) sessionIDFromRequest(r *http.Request) string {
 	return ""
 }
 
-func (h *AuthHandler) frontendRedirectURL() string {
+func (h *AuthHandler) frontendRedirectURL(returnTo string) string {
+	if safeFrontendOrigin(returnTo) {
+		return strings.TrimRight(returnTo, "/")
+	}
 	return strings.TrimRight(h.deps.Config.Auth.FrontendRedirectURL, "/")
 }
 
-func (h *AuthHandler) redirectWithError(w http.ResponseWriter, r *http.Request, message string) {
-	base := strings.TrimRight(h.deps.Config.Auth.FrontendRedirectURL, "/")
+func (h *AuthHandler) redirectWithError(w http.ResponseWriter, r *http.Request, returnTo, message string) {
+	base := h.frontendRedirectURL(returnTo)
 	values := url.Values{}
 	values.Set("auth_error", message)
 	http.Redirect(w, r, base+"?"+values.Encode(), http.StatusFound)
+}
+
+// resolveFrontendReturnTo picks where to send the browser after OAuth.
+// Prefer explicit return_to, then Origin/Referer, then configured default.
+func resolveFrontendReturnTo(r *http.Request, fallback string) string {
+	candidates := []string{
+		strings.TrimSpace(r.URL.Query().Get("return_to")),
+		strings.TrimSpace(r.Header.Get("Origin")),
+	}
+	if ref := strings.TrimSpace(r.Header.Get("Referer")); ref != "" {
+		if u, err := url.Parse(ref); err == nil && u.Scheme != "" && u.Host != "" {
+			candidates = append(candidates, u.Scheme+"://"+u.Host)
+		}
+	}
+	for _, candidate := range candidates {
+		if safeFrontendOrigin(candidate) {
+			return strings.TrimRight(candidate, "/")
+		}
+	}
+	return strings.TrimRight(fallback, "/")
+}
+
+func safeFrontendOrigin(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	if u.Path != "" && u.Path != "/" {
+		return false
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" {
+		return true
+	}
+	// 仅允许私网地址，避免开放重定向
+	if strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "192.168.") {
+		return true
+	}
+	if strings.HasPrefix(host, "172.") {
+		parts := strings.Split(host, ".")
+		if len(parts) >= 2 {
+			var second int
+			if _, err := fmt.Sscanf(parts[1], "%d", &second); err == nil && second >= 16 && second <= 31 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func sessionFromContext(ctx context.Context) (*session.Record, bool) {

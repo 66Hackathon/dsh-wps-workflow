@@ -6,6 +6,7 @@ import {
   overviewStatusTone,
   resolveRequirementOwner,
 } from '../overviewStats';
+import { formatRelativeFromISO } from '../projectDisplay';
 import { isProjectAdmin, userAvatarColor, userAvatarLetter } from '../memberRoles';
 import type { Bug, Project, ProjectMember, Requirement } from '../types';
 
@@ -43,7 +44,9 @@ export function ProjectOverview({
   const stats = buildOverviewStats(requirements, bugs);
   const phases = buildPhaseSegments(requirements);
   const phaseTotal = phases.reduce((sum, p) => sum + p.count, 0) || 1;
-  const recentRequirements = [...requirements].slice(0, 5);
+  const recentRequirements = [...requirements]
+    .sort((a, b) => (Date.parse(b.updated_at ?? '') || 0) - (Date.parse(a.updated_at ?? '') || 0))
+    .slice(0, 5);
   const activity = buildActivityFeed(requirements, members);
   const previewMembers = members.slice(0, 5);
 
@@ -217,7 +220,7 @@ export function ProjectOverview({
                           </span>
                         </td>
                         <td>{resolveRequirementOwner(req, members)}</td>
-                        <td className="tsw-muted">刚刚</td>
+                        <td className="tsw-muted">{formatRelativeFromISO(req.updated_at)}</td>
                       </tr>
                     );
                   })}

@@ -63,7 +63,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   health: () => request<{ status: string }>('/healthz'),
   authConfig: () => request<AuthConfig>('/api/auth/config'),
-  authLogin: () => request<LoginInitResponse>('/api/auth/login'),
+  authLogin: () =>
+    request<LoginInitResponse>(
+      `/api/auth/login?return_to=${encodeURIComponent(window.location.origin)}`,
+    ),
   me: () => request<TeamspaceUser>('/api/auth/me'),
   authStatus: () => request<AuthStatus>('/api/auth/status'),
   logout: () => request<{ status: string }>('/api/auth/logout', { method: 'POST' }),

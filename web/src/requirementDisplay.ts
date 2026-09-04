@@ -84,21 +84,20 @@ export function requirementKindLabel(req: Requirement): string {
 
 export function requirementStatusTone(status: string): 'blue' | 'orange' | 'cyan' | 'green' | 'gray' | 'purple' {
   switch (status) {
+    case 'DEV_DESIGN':
     case 'DEVELOPMENT':
       return 'blue';
-    case 'BUG_FIXING':
-      return 'orange';
     case 'TESTING':
       return 'cyan';
-    case 'DONE':
     case 'PRODUCT_ACCEPTANCE':
       return 'green';
     case 'CLOSED':
     case 'ARCHIVED':
       return 'gray';
-    case 'PRODUCT_REVIEW':
     case 'REGRESSION':
       return 'purple';
+    case 'CREATED':
+    case 'PRODUCT_DESIGN':
     default:
       return 'orange';
   }

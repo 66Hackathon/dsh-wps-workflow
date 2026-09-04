@@ -23,7 +23,7 @@ func withCORS(cfg config.Config, next http.Handler) http.Handler {
 	allowedOrigin := strings.TrimRight(cfg.Auth.FrontendRedirectURL, "/")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" && (origin == allowedOrigin || allowedOrigin == "") {
+		if origin != "" && corsOriginAllowed(origin, allowedOrigin, cfg.DevMode) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Vary", "Origin")
@@ -36,6 +36,22 @@ func withCORS(cfg config.Config, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func corsOriginAllowed(origin, allowedOrigin string, devMode bool) bool {
+	if allowedOrigin == "" || origin == allowedOrigin {
+		return true
+	}
+	// Dev：允许局域网用本机 IP 打开前端后直连后端
+	if !devMode {
+		return false
+	}
+	return strings.HasPrefix(origin, "http://127.0.0.1:") ||
+		strings.HasPrefix(origin, "http://localhost:") ||
+		strings.HasPrefix(origin, "http://0.0.0.0:") ||
+		strings.HasPrefix(origin, "http://10.") ||
+		strings.HasPrefix(origin, "http://192.168.") ||
+		strings.HasPrefix(origin, "http://172.")
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

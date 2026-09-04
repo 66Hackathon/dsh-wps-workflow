@@ -477,6 +477,44 @@ a.tsw-btn { box-sizing: border-box; }
   cursor: pointer;
 }
 
+.tsw-workspacePanelHint {
+  margin: -4px 0 12px;
+  font-size: 12px;
+}
+
+.tsw-workspaceActivityList {
+  gap: 0;
+}
+
+.tsw-workspaceActivityItem {
+  width: 100%;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 2px;
+  border: 0;
+  border-bottom: 1px solid var(--tsw-line);
+  background: transparent;
+  color: var(--tsw-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tsw-workspaceActivityItem:last-child {
+  border-bottom: 0;
+}
+
+.tsw-workspaceActivityItem p {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.tsw-workspaceActivityItem .tsw-muted {
+  font-size: 12px;
+}
+
 .tsw-workspaceReminderList {
   display: flex;
   flex-direction: column;
