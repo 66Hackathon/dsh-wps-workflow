@@ -281,8 +281,8 @@ function ProfileSection({ user }: { user: TeamspaceUser }) {
           </div>
           <dl className="tsw-settingsFieldGrid">
             <div><dt>姓名</dt><dd>{user.name || '—'}</dd></div>
-            <div><dt>昵称</dt><dd>{user.nick_name || '—'}</dd></div>
             <div><dt>企业</dt><dd>{user.company_name || '—'}</dd></div>
+            <div><dt>邮箱</dt><dd>{user.email || '—'}</dd></div>
             <div><dt>WPS 用户 ID</dt><dd>{user.wps_user_id || '—'}</dd></div>
             <div><dt>用户 ID</dt><dd>{user.id}</dd></div>
           </dl>

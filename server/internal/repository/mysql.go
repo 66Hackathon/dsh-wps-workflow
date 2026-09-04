@@ -13,12 +13,12 @@ import (
 
 // User is a TeamSpace user row exposed to clients.
 type User struct {
-	ID          uint64 `json:"id"`
-	WPSUserID   string `json:"wps_user_id"`
-	Name        string `json:"name"`
-	NickName    string `json:"nick_name,omitempty"`
-	AvatarURL   string `json:"avatar_url,omitempty"`
-	CompanyName string `json:"company_name,omitempty"`
+	ID           uint64 `json:"id"`
+	WPSUserID    string `json:"wps_user_id"`
+	Name         string `json:"name"`
+	AvatarURL    string `json:"avatar_url,omitempty"`
+	CompanyName  string `json:"company_name,omitempty"`
+	Email        string `json:"email,omitempty"`
 	AccountState string `json:"account_state"`
 }
 
@@ -80,7 +80,6 @@ func (r *Repository) UpsertWPSUser(ctx context.Context, profile *wps.UserInfo, t
 	}
 
 	displayName := profile.DisplayName()
-	nickName := strings.TrimSpace(profile.NickName)
 	avatarURL := strings.TrimSpace(profile.Avatar)
 	companyName := strings.TrimSpace(profile.CompanyID) // WPS UserInfo 无 CompanyName，暂用 CompanyID
 	now := time.Now().UTC()
@@ -99,13 +98,12 @@ func (r *Repository) UpsertWPSUser(ctx context.Context, profile *wps.UserInfo, t
 	if err == sql.ErrNoRows {
 		result, insertErr := r.db.ExecContext(ctx, `
 			INSERT INTO users (
-				wps_user_id, name, nick_name, avatar_url, company_name,
+				wps_user_id, name, avatar_url, company_name,
 				wps_access_token, wps_refresh_token, wps_token_expires_at, wps_refresh_expires_at,
-				account_state, first_login_at, last_login_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`,
-			profile.ID, displayName, nullIfEmpty(nickName), nullIfEmpty(avatarURL), nullIfEmpty(companyName),
-			token.AccessToken, nullIfEmpty(token.RefreshToken), expiresAt, refreshExpires,
-			now, now)
+				account_state
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')`,
+			profile.ID, displayName, nullIfEmpty(avatarURL), nullIfEmpty(companyName),
+			token.AccessToken, nullIfEmpty(token.RefreshToken), expiresAt, refreshExpires)
 		if insertErr != nil {
 			return User{}, insertErr
 		}
@@ -117,14 +115,14 @@ func (r *Repository) UpsertWPSUser(ctx context.Context, profile *wps.UserInfo, t
 	} else {
 		_, err = r.db.ExecContext(ctx, `
 			UPDATE users SET
-				name = ?, nick_name = ?, avatar_url = ?, company_name = ?,
+				name = ?, avatar_url = ?, company_name = ?,
 				wps_access_token = ?, wps_refresh_token = ?,
 				wps_token_expires_at = ?, wps_refresh_expires_at = ?,
-				account_state = 'ACTIVE', last_login_at = ?
+				account_state = 'ACTIVE'
 			WHERE id = ?`,
-			displayName, nullIfEmpty(nickName), nullIfEmpty(avatarURL), nullIfEmpty(companyName),
+			displayName, nullIfEmpty(avatarURL), nullIfEmpty(companyName),
 			token.AccessToken, nullIfEmpty(token.RefreshToken), expiresAt, refreshExpires,
-			now, userID)
+			userID)
 		if err != nil {
 			return User{}, err
 		}

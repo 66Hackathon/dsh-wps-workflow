@@ -54,8 +54,8 @@ export function validateMemberRoles(uiRoles: string[], isCreator: boolean): stri
   return null;
 }
 
-export function userDisplayName(name: string, nickName?: string): string {
-  return nickName?.trim() || name;
+export function userDisplayName(name: string, _nickName?: string): string {
+  return name?.trim() || '';
 }
 
 export function userAvatarLetter(name: string): string {

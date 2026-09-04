@@ -28,7 +28,7 @@ type PanelDialog =
   | null;
 
 function displayUserName(user: OrgUser): string {
-  return userDisplayName(user.name, user.nick_name);
+  return userDisplayName(user.name);
 }
 
 function memberLabel(member: ProjectMember): string {

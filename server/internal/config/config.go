@@ -22,7 +22,14 @@ type Config struct {
 
 	WPS     WPSOAuthConfig
 	Auth    AuthConfig
+	Log     LogConfig
 	DevMode bool
+}
+
+// LogConfig holds zap logger settings.
+type LogConfig struct {
+	Level    string // debug / info / warn / error
+	Encoding string // json / console
 }
 
 // RefreshLeadDuration returns how long before access token expiry to trigger refresh.
@@ -93,6 +100,10 @@ func Load() (Config, error) {
 			SessionCookiePath:   envString("TEAMSPACE_SESSION_COOKIE_PATH", "/api"),
 			FrontendRedirectURL: envString("TEAMSPACE_FRONTEND_REDIRECT_URL", "http://127.0.0.1:5173"),
 			StateCookieName:     envString("TEAMSPACE_OAUTH_STATE_COOKIE", "teamspace_oauth_state"),
+		},
+		Log: LogConfig{
+			Level:    envString("TEAMSPACE_LOG_LEVEL", "info"),
+			Encoding: envString("TEAMSPACE_LOG_ENCODING", ""),
 		},
 		DevMode: envBool("TEAMSPACE_DEV_MODE", false),
 	}

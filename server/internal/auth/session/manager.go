@@ -15,7 +15,6 @@ type User struct {
 	ID           uint64 `json:"id"`
 	WPSUserID    string `json:"wps_user_id"`
 	Name         string `json:"name"`
-	NickName     string `json:"nick_name,omitempty"`
 	AvatarURL    string `json:"avatar_url,omitempty"`
 	CompanyName  string `json:"company_name,omitempty"`
 	AccountState string `json:"account_state"`
@@ -56,7 +55,6 @@ type UserProfile struct {
 	ID           uint64
 	WPSUserID    string
 	Name         string
-	NickName     string
 	AvatarURL    string
 	CompanyName  string
 	AccountState string
@@ -251,7 +249,6 @@ func userFromProfile(profile UserProfile) User {
 		ID:           profile.ID,
 		WPSUserID:    profile.WPSUserID,
 		Name:         profile.Name,
-		NickName:     profile.NickName,
 		AvatarURL:    profile.AvatarURL,
 		CompanyName:  profile.CompanyName,
 		AccountState: profile.AccountState,

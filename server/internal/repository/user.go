@@ -30,7 +30,7 @@ func (r *Repository) mapUserDisplayNames(ctx context.Context, userIDs []uint64) 
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, COALESCE(NULLIF(nick_name, ''), name, '')
+		SELECT id, name
 		FROM users
 		WHERE id IN (`+strings.Repeat("?,", len(unique)-1)+`?)`,
 		uint64Args(unique)...)
@@ -51,13 +51,13 @@ func (r *Repository) mapUserDisplayNames(ctx context.Context, userIDs []uint64) 
 }
 
 const userSelectColumns = `
-	id, wps_user_id, name, IFNULL(nick_name, ''), IFNULL(avatar_url, ''), IFNULL(company_name, ''), account_state
+	id, wps_user_id, name, IFNULL(avatar_url, ''), IFNULL(company_name, ''), IFNULL(email, ''), account_state
 `
 
 func scanUser(row scanner) (User, error) {
 	var user User
 	err := row.Scan(
-		&user.ID, &user.WPSUserID, &user.Name, &user.NickName, &user.AvatarURL, &user.CompanyName,
+		&user.ID, &user.WPSUserID, &user.Name, &user.AvatarURL, &user.CompanyName, &user.Email,
 		&user.AccountState,
 	)
 	if err != nil {
@@ -89,16 +89,15 @@ func (r *Repository) GetUserByWPSID(ctx context.Context, wpsUserID string) (User
 
 // OrgUser is a lightweight user row for member pickers.
 type OrgUser struct {
-	ID       uint64 `json:"id"`
-	Name     string `json:"name"`
-	NickName string `json:"nick_name,omitempty"`
-	Email    string `json:"email,omitempty"`
+	ID    uint64 `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email,omitempty"`
 }
 
 // ListAllUsers returns all active system users (for member pickers).
 func (r *Repository) ListAllUsers(ctx context.Context) ([]OrgUser, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, IFNULL(nick_name, ''), IFNULL(email, '')
+		SELECT id, name, IFNULL(email, '')
 		FROM users
 		WHERE account_state = 'ACTIVE'
 		ORDER BY id`)
@@ -110,11 +109,10 @@ func (r *Repository) ListAllUsers(ctx context.Context) ([]OrgUser, error) {
 	items := make([]OrgUser, 0)
 	for rows.Next() {
 		var item OrgUser
-		if err := rows.Scan(&item.ID, &item.Name, &item.NickName, &item.Email); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Email); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
 	}
 	return items, rows.Err()
 }
-

@@ -2,9 +2,9 @@ export interface TeamspaceUser {
   id: number;
   wps_user_id: string;
   name: string;
-  nick_name?: string;
   avatar_url?: string;
   company_name?: string;
+  email?: string;
   account_state: string;
 }
 
@@ -84,7 +84,6 @@ export interface ProjectMember {
 export interface OrgUser {
   id: number;
   name: string;
-  nick_name?: string;
   email?: string;
 }
 

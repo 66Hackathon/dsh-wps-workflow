@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"github.com/gin-gonic/gin"
+
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/66hackathon/dsh-wps-workflow/server/internal/auth/session"
 	"github.com/66hackathon/dsh-wps-workflow/server/internal/auth/wps"
@@ -22,6 +25,7 @@ const systemSessionTTL = 7 * 24 * 3600
 // AuthDeps groups auth handler dependencies.
 type AuthDeps struct {
 	Config   config.Config
+	Log      *zap.Logger
 	WPS      *wps.Client
 	Sessions *session.Manager
 	Repo     *repository.Repository
@@ -38,19 +42,19 @@ func NewAuthHandler(deps AuthDeps) *AuthHandler {
 }
 
 // HandleLogin returns OAuth parameters for the frontend to start authorization.
-func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) HandleLogin(c *gin.Context) {
 	if !h.deps.Config.OAuthConfigured() {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+		writeJSON(c, http.StatusServiceUnavailable, map[string]string{
 			"error":   "oauth_not_configured",
 			"message": "WPS OAuth 未配置，请在 server/.env 填入 WPS_OAUTH_CLIENT_ID、WPS_OAUTH_CLIENT_SECRET 和 WPS_OAUTH_REDIRECT_URI",
 		})
 		return
 	}
 
-	returnTo := resolveFrontendReturnTo(r, h.deps.Config.Auth.FrontendRedirectURL)
+	returnTo := resolveFrontendReturnTo(c, h.deps.Config.Auth.FrontendRedirectURL)
 	state, err := h.deps.Sessions.CreateState(returnTo)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		writeJSON(c, http.StatusInternalServerError, map[string]string{
 			"error":   "state_create_failed",
 			"message": err.Error(),
 		})
@@ -59,14 +63,14 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	authURL, err := h.deps.WPS.AuthorizeURL(state)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		writeJSON(c, http.StatusInternalServerError, map[string]string{
 			"error":   "authorize_url_failed",
 			"message": err.Error(),
 		})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeJSON(c, http.StatusOK, map[string]string{
 		"client_id":    h.deps.Config.WPS.ClientID,
 		"state":        state,
 		"redirect_url": authURL,
@@ -75,27 +79,27 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleCallback completes OAuth, persists the user, and redirects with a system token.
-func (h *AuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) HandleCallback(c *gin.Context) {
 	if !h.deps.Config.OAuthConfigured() {
-		h.redirectWithError(w, r, "", "WPS OAuth 未配置")
+		h.redirectWithError(c, "", "WPS OAuth 未配置")
 		return
 	}
 
-	if errCode := r.URL.Query().Get("error"); errCode != "" {
-		desc := r.URL.Query().Get("error_description")
-		h.redirectWithError(w, r, "", fmt.Sprintf("%s: %s", errCode, desc))
+	if errCode := c.Query("error"); errCode != "" {
+		desc := c.Query("error_description")
+		h.redirectWithError(c, "", fmt.Sprintf("%s: %s", errCode, desc))
 		return
 	}
 
-	code := r.URL.Query().Get("code")
-	state := r.URL.Query().Get("state")
+	code := c.Query("code")
+	state := c.Query("state")
 	if code == "" {
-		h.redirectWithError(w, r, "", "missing authorization code")
+		h.redirectWithError(c, "", "missing authorization code")
 		return
 	}
 	returnTo, ok := h.deps.Sessions.ConsumeState(state)
 	if state == "" || !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		writeJSON(c, http.StatusBadRequest, map[string]string{
 			"error":   "invalid_state",
 			"message": "OAuth state mismatch or expired",
 		})
@@ -103,50 +107,50 @@ func (h *AuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	frontendBase := h.frontendRedirectURL(returnTo)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()
 
 	token, err := h.deps.WPS.ExchangeCode(ctx, code)
 	if err != nil {
-		h.redirectWithError(w, r, frontendBase, "token exchange failed: "+err.Error())
+		h.redirectWithError(c, frontendBase, "token exchange failed: "+err.Error())
 		return
 	}
 
 	profile, err := h.deps.WPS.CurrentUser(ctx, token.AccessToken)
 	if err != nil {
-		h.redirectWithError(w, r, frontendBase, "load user profile failed: "+err.Error())
+		h.redirectWithError(c, frontendBase, "load user profile failed: "+err.Error())
 		return
 	}
 
 	user, err := h.deps.Repo.UpsertWPSUser(ctx, profile, token)
 	if err != nil {
-		h.redirectWithError(w, r, frontendBase, "persist user failed: "+err.Error())
+		h.redirectWithError(c, frontendBase, "persist user failed: "+err.Error())
 		return
 	}
 
 	sessionID, _, err := h.deps.Sessions.CreateSession(repositoryUserToSessionUser(user), systemSessionTTL)
 	if err != nil {
-		h.redirectWithError(w, r, frontendBase, "create session failed: "+err.Error())
+		h.redirectWithError(c, frontendBase, "create session failed: "+err.Error())
 		return
 	}
 
 	redirectURL := frontendBase + "?" + url.Values{"token": {sessionID}}.Encode()
-	http.Redirect(w, r, redirectURL, http.StatusFound)
+	c.Redirect(http.StatusFound, redirectURL)
 }
 
-func (h *AuthHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
-	sessionID := h.sessionIDFromRequest(r)
+func (h *AuthHandler) HandleMe(c *gin.Context) {
+	sessionID := h.sessionIDFromRequest(c)
 	if sessionID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{
+		writeJSON(c, http.StatusUnauthorized, map[string]string{
 			"error":   "unauthorized",
 			"message": "login required",
 		})
 		return
 	}
 
-	record, ok := h.loadSession(r.Context(), sessionID)
+	record, ok := h.loadSession(c.Request.Context(), sessionID)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{
+		writeJSON(c, http.StatusUnauthorized, map[string]string{
 			"error":   "unauthorized",
 			"message": "session expired",
 		})
@@ -155,16 +159,16 @@ func (h *AuthHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
 
 	user := record.User
 	if h.deps.Repo != nil {
-		if fresh, err := h.deps.Repo.GetUserByID(r.Context(), record.User.ID); err == nil {
+		if fresh, err := h.deps.Repo.GetUserByID(c.Request.Context(), record.User.ID); err == nil {
 			user = repositoryUserToSessionUser(fresh)
 		}
 	}
 
-	writeJSON(w, http.StatusOK, user)
+	writeJSON(c, http.StatusOK, user)
 }
 
-func (h *AuthHandler) HandleAuthConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+func (h *AuthHandler) HandleAuthConfig(c *gin.Context) {
+	writeJSON(c, http.StatusOK, map[string]any{
 		"oauth_configured": h.deps.Config.OAuthConfigured(),
 		"dev_mode":         h.deps.Config.DevMode,
 		"login_path":       "/api/auth/login",
@@ -173,30 +177,30 @@ func (h *AuthHandler) HandleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *AuthHandler) HandleAuthStatus(w http.ResponseWriter, r *http.Request) {
-	sessionID := h.sessionIDFromRequest(r)
+func (h *AuthHandler) HandleAuthStatus(c *gin.Context) {
+	sessionID := h.sessionIDFromRequest(c)
 	if sessionID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
 
-	record, ok := h.loadSession(r.Context(), sessionID)
+	record, ok := h.loadSession(c.Request.Context(), sessionID)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session_expired"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "session_expired"})
 		return
 	}
 
 	status := map[string]any{
-		"authenticated":      true,
-		"provider":             "wps_oauth",
-		"session_expires_at":   record.ExpiresAt.UTC().Format(time.RFC3339),
-		"auto_renew_enabled":   false,
-		"wps_access_expires_at": "",
+		"authenticated":          true,
+		"provider":               "wps_oauth",
+		"session_expires_at":     record.ExpiresAt.UTC().Format(time.RFC3339),
+		"auto_renew_enabled":     false,
+		"wps_access_expires_at":  "",
 		"wps_refresh_expires_at": "",
 	}
 
 	if h.deps.Repo != nil {
-		tokens, err := h.deps.Repo.GetUserWPSTokens(r.Context(), record.User.ID)
+		tokens, err := h.deps.Repo.GetUserWPSTokens(c.Request.Context(), record.User.ID)
 		if err == nil {
 			status["auto_renew_enabled"] = tokens.RefreshToken != ""
 			if !tokens.ExpiresAt.IsZero() {
@@ -208,102 +212,104 @@ func (h *AuthHandler) HandleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, status)
+	writeJSON(c, http.StatusOK, status)
 }
 
-func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
-	if sessionID := h.sessionIDFromRequest(r); sessionID != "" {
+func (h *AuthHandler) HandleLogout(c *gin.Context) {
+	if sessionID := h.sessionIDFromRequest(c); sessionID != "" {
 		h.deps.Sessions.Delete(sessionID)
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(c, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // HandleDevLogin creates a session for a seed user (development only).
-func (h *AuthHandler) HandleDevLogin(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) HandleDevLogin(c *gin.Context) {
 	if !h.deps.Config.DevMode {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		writeJSON(c, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+	if c.Request.Method != http.MethodPost {
+		writeJSON(c, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 		return
 	}
 
 	var body struct {
 		UserID uint64 `json:"user_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.UserID == 0 {
+	if err := c.ShouldBindJSON(&body); err != nil || body.UserID == 0 {
 		body.UserID = 1
 	}
 
-	user, err := h.deps.Repo.GetUserByID(r.Context(), body.UserID)
+	user, err := h.deps.Repo.GetUserByID(c.Request.Context(), body.UserID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "user_not_found", "message": err.Error()})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "user_not_found", "message": err.Error()})
 		return
 	}
 
 	sessionID, _, err := h.deps.Sessions.CreateSession(repositoryUserToSessionUser(user), systemSessionTTL)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "session_failed", "message": err.Error()})
+		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "session_failed", "message": err.Error()})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(c, http.StatusOK, map[string]any{
 		"token": sessionID,
 		"user":  user,
 	})
 }
 
 // HandleDevUsers lists seed users for the dev login picker (development only).
-func (h *AuthHandler) HandleDevUsers(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) HandleDevUsers(c *gin.Context) {
 	if !h.deps.Config.DevMode {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		writeJSON(c, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return
 	}
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+	if c.Request.Method != http.MethodGet {
+		writeJSON(c, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 		return
 	}
 
-	users, err := h.deps.Repo.ListAllUsers(r.Context())
+	users, err := h.deps.Repo.ListAllUsers(c.Request.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		writeJSON(c, http.StatusInternalServerError, map[string]string{
 			"error":   "list_failed",
 			"message": err.Error(),
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": users})
+	writeJSON(c, http.StatusOK, map[string]any{"items": users})
 }
 
 // Middleware loads the Bearer session into request context when present.
-func (h *AuthHandler) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if sessionID := h.sessionIDFromRequest(r); sessionID != "" {
-			if record, ok := h.loadSession(r.Context(), sessionID); ok {
-				r = r.WithContext(context.WithValue(r.Context(), authContextKey{}, record))
+func (h *AuthHandler) Middleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if sessionID := h.sessionIDFromRequest(c); sessionID != "" {
+			if record, ok := h.loadSession(c.Request.Context(), sessionID); ok {
+				ctx := context.WithValue(c.Request.Context(), authContextKey{}, record)
+				c.Request = c.Request.WithContext(ctx)
 			}
 		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// RequireAuth rejects requests without a valid session.
-func (h *AuthHandler) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := sessionFromContext(r.Context()); !ok {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{
-				"error":   "unauthorized",
-				"message": "login required",
-			})
-			return
-		}
-		next(w, r)
+		c.Next()
 	}
 }
 
-func (h *AuthHandler) sessionIDFromRequest(r *http.Request) string {
-	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+// RequireAuth rejects requests without a valid session.
+func (h *AuthHandler) RequireAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, ok := sessionFromContext(c.Request.Context()); !ok {
+			writeJSON(c, http.StatusUnauthorized, map[string]string{
+				"error":   "unauthorized",
+				"message": "login required",
+			})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+func (h *AuthHandler) sessionIDFromRequest(c *gin.Context) string {
+	auth := strings.TrimSpace(c.GetHeader("Authorization"))
 	if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
 		return strings.TrimSpace(auth[7:])
 	}
@@ -317,21 +323,21 @@ func (h *AuthHandler) frontendRedirectURL(returnTo string) string {
 	return strings.TrimRight(h.deps.Config.Auth.FrontendRedirectURL, "/")
 }
 
-func (h *AuthHandler) redirectWithError(w http.ResponseWriter, r *http.Request, returnTo, message string) {
+func (h *AuthHandler) redirectWithError(c *gin.Context, returnTo, message string) {
 	base := h.frontendRedirectURL(returnTo)
 	values := url.Values{}
 	values.Set("auth_error", message)
-	http.Redirect(w, r, base+"?"+values.Encode(), http.StatusFound)
+	c.Redirect(http.StatusFound, base+"?"+values.Encode())
 }
 
 // resolveFrontendReturnTo picks where to send the browser after OAuth.
 // Prefer explicit return_to, then Origin/Referer, then configured default.
-func resolveFrontendReturnTo(r *http.Request, fallback string) string {
+func resolveFrontendReturnTo(c *gin.Context, fallback string) string {
 	candidates := []string{
-		strings.TrimSpace(r.URL.Query().Get("return_to")),
-		strings.TrimSpace(r.Header.Get("Origin")),
+		strings.TrimSpace(c.Query("return_to")),
+		strings.TrimSpace(c.GetHeader("Origin")),
 	}
-	if ref := strings.TrimSpace(r.Header.Get("Referer")); ref != "" {
+	if ref := strings.TrimSpace(c.GetHeader("Referer")); ref != "" {
 		if u, err := url.Parse(ref); err == nil && u.Scheme != "" && u.Host != "" {
 			candidates = append(candidates, u.Scheme+"://"+u.Host)
 		}
@@ -392,7 +398,6 @@ func repositoryUserToSessionUser(user repository.User) session.User {
 		ID:           user.ID,
 		WPSUserID:    user.WPSUserID,
 		Name:         user.Name,
-		NickName:     user.NickName,
 		AvatarURL:    user.AvatarURL,
 		CompanyName:  user.CompanyName,
 		AccountState: user.AccountState,

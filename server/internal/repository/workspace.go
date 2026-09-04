@@ -181,20 +181,20 @@ func (r *Repository) listWorkspaceTodos(ctx context.Context, userID uint64) ([]W
 
 func (r *Repository) listWorkspaceActivities(ctx context.Context, userID uint64) ([]WorkspaceActivity, error) {
 	type rawEvent struct {
-		id         uint64
-		kind       string
-		itemType   string
-		resourceID uint64
-		code       string
-		title      string
-		projectID  uint64
+		id          uint64
+		kind        string
+		itemType    string
+		resourceID  uint64
+		code        string
+		title       string
+		projectID   uint64
 		projectName string
-		fromStatus string
-		toStatus   string
-		stageCode  string
-		remark     string
-		operatorID uint64
-		occurredAt string
+		fromStatus  string
+		toStatus    string
+		stageCode   string
+		remark      string
+		operatorID  uint64
+		occurredAt  string
 	}
 
 	events := make([]rawEvent, 0, 40)

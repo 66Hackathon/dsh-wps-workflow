@@ -8,26 +8,26 @@ import (
 
 // RequirementStageSubmission is a persisted stage exit record.
 type RequirementStageSubmission struct {
-	ID                uint64    `json:"id"`
-	RequirementID     uint64    `json:"requirement_id"`
-	StageCode         string    `json:"stage_code"`
-	SpecBody          *string   `json:"spec_body,omitempty"`
-	AcceptanceCriteria *string  `json:"acceptance_criteria,omitempty"`
-	DevDesignDoc      *string   `json:"dev_design_doc,omitempty"`
-	DevSummary        *string   `json:"dev_summary,omitempty"`
-	ImplementationNotes *string `json:"implementation_notes,omitempty"`
-	DeveloperUserID   *uint64   `json:"developer_user_id,omitempty"`
-	ReturnReason      *string   `json:"return_reason,omitempty"`
-	TestResult        *string   `json:"test_result,omitempty"`
-	TestSummary       *string   `json:"test_summary,omitempty"`
-	TestCasesCovered  *string   `json:"test_cases_covered,omitempty"`
-	TesterUserID      *uint64   `json:"tester_user_id,omitempty"`
-	AcceptanceNote    *string   `json:"acceptance_note,omitempty"`
-	RegressionResult  *string   `json:"regression_result,omitempty"`
-	RegressionSummary *string   `json:"regression_summary,omitempty"`
-	OperatorUserID    uint64    `json:"operator_user_id"`
-	OperatorName      string    `json:"operator_name,omitempty"`
-	SubmittedAt       time.Time `json:"submitted_at"`
+	ID                  uint64    `json:"id"`
+	RequirementID       uint64    `json:"requirement_id"`
+	StageCode           string    `json:"stage_code"`
+	SpecBody            *string   `json:"spec_body,omitempty"`
+	AcceptanceCriteria  *string   `json:"acceptance_criteria,omitempty"`
+	DevDesignDoc        *string   `json:"dev_design_doc,omitempty"`
+	DevSummary          *string   `json:"dev_summary,omitempty"`
+	ImplementationNotes *string   `json:"implementation_notes,omitempty"`
+	DeveloperUserID     *uint64   `json:"developer_user_id,omitempty"`
+	ReturnReason        *string   `json:"return_reason,omitempty"`
+	TestResult          *string   `json:"test_result,omitempty"`
+	TestSummary         *string   `json:"test_summary,omitempty"`
+	TestCasesCovered    *string   `json:"test_cases_covered,omitempty"`
+	TesterUserID        *uint64   `json:"tester_user_id,omitempty"`
+	AcceptanceNote      *string   `json:"acceptance_note,omitempty"`
+	RegressionResult    *string   `json:"regression_result,omitempty"`
+	RegressionSummary   *string   `json:"regression_summary,omitempty"`
+	OperatorUserID      uint64    `json:"operator_user_id"`
+	OperatorName        string    `json:"operator_name,omitempty"`
+	SubmittedAt         time.Time `json:"submitted_at"`
 }
 
 // StatusChangeLogEntry is one requirement status transition audit record.

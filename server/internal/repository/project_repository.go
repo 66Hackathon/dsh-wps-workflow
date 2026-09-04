@@ -11,16 +11,16 @@ import (
 
 // ProjectRepository is a code repo linked to a project with a dev direction.
 type ProjectRepository struct {
-	ID             uint64 `json:"id"`
-	ProjectID      uint64 `json:"project_id"`
-	RepoName       string `json:"repo_name,omitempty"`
-	RepoURL        string `json:"repo_url"`
-	DefaultBranch  string `json:"default_branch"`
-	DevDirection   string `json:"dev_direction"`
+	ID                uint64 `json:"id"`
+	ProjectID         uint64 `json:"project_id"`
+	RepoName          string `json:"repo_name,omitempty"`
+	RepoURL           string `json:"repo_url"`
+	DefaultBranch     string `json:"default_branch"`
+	DevDirection      string `json:"dev_direction"`
 	DevDirectionLabel string `json:"dev_direction_label,omitempty"`
-	SortOrder      uint32 `json:"sort_order"`
-	CreatedAt      string `json:"created_at,omitempty"`
-	UpdatedAt      string `json:"updated_at,omitempty"`
+	SortOrder         uint32 `json:"sort_order"`
+	CreatedAt         string `json:"created_at,omitempty"`
+	UpdatedAt         string `json:"updated_at,omitempty"`
 }
 
 // CreateProjectRepositoryInput holds fields for adding a repo.

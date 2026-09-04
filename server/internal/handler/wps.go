@@ -1,7 +1,8 @@
 package handler
 
 import (
-	"encoding/json"
+	"github.com/gin-gonic/gin"
+
 	"net/http"
 	"strings"
 
@@ -23,10 +24,10 @@ func NewWPSHandler(repo *repository.Repository, auth *AuthHandler, client *wps.C
 	return &WPSHandler{repo: repo, auth: auth, wps: client}
 }
 
-func (h *WPSHandler) tenantAccessToken(w http.ResponseWriter, r *http.Request) (string, bool) {
-	token, err := h.wps.TenantAccessToken(r.Context())
+func (h *WPSHandler) tenantAccessToken(c *gin.Context) (string, bool) {
+	token, err := h.wps.TenantAccessToken(c.Request.Context())
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
+		writeJSON(c, http.StatusBadGateway, map[string]string{
 			"error":   "wps_app_token_failed",
 			"message": err.Error(),
 		})
@@ -35,16 +36,16 @@ func (h *WPSHandler) tenantAccessToken(w http.ResponseWriter, r *http.Request) (
 	return token, true
 }
 
-func (h *WPSHandler) accessToken(w http.ResponseWriter, r *http.Request) (string, uint64, bool) {
-	record, ok := sessionFromContext(r.Context())
+func (h *WPSHandler) accessToken(c *gin.Context) (string, uint64, bool) {
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return "", 0, false
 	}
-	h.auth.ensureFreshWPSTokens(r.Context(), record.User.ID)
-	tokens, err := h.repo.GetUserWPSTokens(r.Context(), record.User.ID)
+	h.auth.ensureFreshWPSTokens(c.Request.Context(), record.User.ID)
+	tokens, err := h.repo.GetUserWPSTokens(c.Request.Context(), record.User.ID)
 	if err != nil || tokens.AccessToken == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		writeJSON(c, http.StatusBadRequest, map[string]string{
 			"error":   "wps_token_missing",
 			"message": "当前账号未绑定 WPS OAuth 凭证，请使用 WPS 登录后再试",
 		})
@@ -53,27 +54,27 @@ func (h *WPSHandler) accessToken(w http.ResponseWriter, r *http.Request) (string
 	return tokens.AccessToken, record.User.ID, true
 }
 
-func (h *WPSHandler) handleSearchContacts(w http.ResponseWriter, r *http.Request) {
-	accessToken, ok := h.tenantAccessToken(w, r)
+func (h *WPSHandler) handleSearchContacts(c *gin.Context) {
+	accessToken, ok := h.tenantAccessToken(c)
 	if !ok {
 		return
 	}
-	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
-	items, err := h.wps.SearchContacts(r.Context(), accessToken, keyword, 50)
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	items, err := h.wps.SearchContacts(c.Request.Context(), accessToken, keyword, 50)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{
+		writeJSON(c, http.StatusBadGateway, map[string]any{
 			"error":   "wps_contacts_failed",
 			"message": err.Error(),
 			"hint":    wpsPermissionHint(err),
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(c, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *WPSHandler) handleEnsureContacts(w http.ResponseWriter, r *http.Request) {
-	if _, ok := sessionFromContext(r.Context()); !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+func (h *WPSHandler) handleEnsureContacts(c *gin.Context) {
+	if _, ok := sessionFromContext(c.Request.Context()); !ok {
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
 
@@ -86,8 +87,8 @@ func (h *WPSHandler) handleEnsureContacts(w http.ResponseWriter, r *http.Request
 			AvatarURL string `json:"avatar_url"`
 		} `json:"items"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Items) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+	if err := c.ShouldBindJSON(&body); err != nil || len(body.Items) == 0 {
+		writeJSON(c, http.StatusBadRequest, map[string]string{
 			"error":   "invalid_json",
 			"message": "items is required",
 		})
@@ -105,34 +106,34 @@ func (h *WPSHandler) handleEnsureContacts(w http.ResponseWriter, r *http.Request
 		})
 	}
 
-	items, err := h.repo.EnsureUsersFromWPSContacts(r.Context(), inputs)
+	items, err := h.repo.EnsureUsersFromWPSContacts(c.Request.Context(), inputs)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		writeJSON(c, http.StatusInternalServerError, map[string]string{
 			"error":   "ensure_contacts_failed",
 			"message": err.Error(),
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(c, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *WPSHandler) handleListChats(w http.ResponseWriter, r *http.Request) {
-	accessToken, ok := h.tenantAccessToken(w, r)
+func (h *WPSHandler) handleListChats(c *gin.Context) {
+	accessToken, ok := h.tenantAccessToken(c)
 	if !ok {
 		return
 	}
-	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
+	keyword := strings.TrimSpace(c.Query("keyword"))
 	var (
 		items []wps.ChatSummary
 		err   error
 	)
 	if keyword != "" {
-		items, err = h.wps.SearchChats(r.Context(), accessToken, keyword, 50)
+		items, err = h.wps.SearchChats(c.Request.Context(), accessToken, keyword, 50)
 	} else {
-		items, err = h.wps.ListChats(r.Context(), accessToken, 50)
+		items, err = h.wps.ListChats(c.Request.Context(), accessToken, 50)
 	}
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
+		writeJSON(c, http.StatusBadGateway, map[string]string{
 			"error":   "wps_chats_failed",
 			"message": err.Error(),
 		})
@@ -141,18 +142,18 @@ func (h *WPSHandler) handleListChats(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []wps.ChatSummary{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(c, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *WPSHandler) handleCreateChat(w http.ResponseWriter, r *http.Request) {
-	accessToken, ok := h.tenantAccessToken(w, r)
+func (h *WPSHandler) handleCreateChat(c *gin.Context) {
+	accessToken, ok := h.tenantAccessToken(c)
 	if !ok {
 		return
 	}
 
-	record, ok := sessionFromContext(r.Context())
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
 	userID := record.User.ID
@@ -162,12 +163,12 @@ func (h *WPSHandler) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 		OwnerWPSUserID  string   `json:"owner_wps_user_id"`
 		MemberWPSUserID []string `json:"member_wps_user_ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
 	if strings.TrimSpace(body.Name) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		writeJSON(c, http.StatusBadRequest, map[string]string{
 			"error":   "invalid_fields",
 			"message": "name is required",
 		})
@@ -176,9 +177,9 @@ func (h *WPSHandler) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 
 	ownerID := strings.TrimSpace(body.OwnerWPSUserID)
 	if ownerID == "" {
-		user, err := h.repo.GetUserByID(r.Context(), userID)
+		user, err := h.repo.GetUserByID(c.Request.Context(), userID)
 		if err != nil || !wps.ValidWPSUserID(user.WPSUserID) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
+			writeJSON(c, http.StatusBadRequest, map[string]string{
 				"error":   "owner_missing",
 				"message": "无法确定有效的群主 WPS 用户 ID，请使用 WPS 账号登录",
 			})
@@ -187,61 +188,61 @@ func (h *WPSHandler) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 		ownerID = user.WPSUserID
 	}
 
-	chat, err := h.wps.CreateGroupChat(r.Context(), accessToken, wps.CreateGroupChatInput{
+	chat, err := h.wps.CreateGroupChat(c.Request.Context(), accessToken, wps.CreateGroupChatInput{
 		Name:      body.Name,
 		OwnerID:   ownerID,
 		MemberIDs: body.MemberWPSUserID,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
+		writeJSON(c, http.StatusBadGateway, map[string]string{
 			"error":   "wps_create_chat_failed",
 			"message": err.Error(),
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, chat)
+	writeJSON(c, http.StatusOK, chat)
 }
 
-func (h *WPSHandler) handleCreateProjectGroup(w http.ResponseWriter, r *http.Request) {
-	accessToken, ok := h.tenantAccessToken(w, r)
+func (h *WPSHandler) handleCreateProjectGroup(c *gin.Context) {
+	accessToken, ok := h.tenantAccessToken(c)
 	if !ok {
 		return
 	}
 
 	userID := uint64(0)
-	if record, ok := sessionFromContext(r.Context()); ok {
+	if record, ok := sessionFromContext(c.Request.Context()); ok {
 		userID = record.User.ID
 	}
 
-	projectID, err := parsePathUint64(r, "id")
+	projectID, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
 
-	record, ok := sessionFromContext(r.Context())
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	canManage, err := h.repo.MemberCanManageProject(r.Context(), projectID, record.User.ID)
+	canManage, err := h.repo.MemberCanManageProject(c.Request.Context(), projectID, record.User.ID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "check_failed", "message": err.Error()})
+		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "check_failed", "message": err.Error()})
 		return
 	}
 	if !canManage {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden", "message": "only project manager can manage members"})
+		writeJSON(c, http.StatusForbidden, map[string]string{"error": "forbidden", "message": "only project manager can manage members"})
 		return
 	}
 
 	var body struct {
 		Name *string `json:"name"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	_ = c.ShouldBindJSON(&body)
 
-	project, err := h.repo.GetProject(r.Context(), projectID)
+	project, err := h.repo.GetProject(c.Request.Context(), projectID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project_not_found"})
+		writeJSON(c, http.StatusNotFound, map[string]string{"error": "project_not_found"})
 		return
 	}
 
@@ -250,18 +251,18 @@ func (h *WPSHandler) handleCreateProjectGroup(w http.ResponseWriter, r *http.Req
 		groupName = strings.TrimSpace(*body.Name)
 	}
 
-	owner, err := h.repo.GetUserByID(r.Context(), userID)
+	owner, err := h.repo.GetUserByID(c.Request.Context(), userID)
 	if err != nil || !wps.ValidWPSUserID(owner.WPSUserID) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		writeJSON(c, http.StatusBadRequest, map[string]string{
 			"error":   "owner_missing",
 			"message": "当前用户缺少有效的 WPS 用户 ID，请使用 WPS 企业账号登录后再创建群聊（演示账号不支持）",
 		})
 		return
 	}
 
-	memberIDs, err := h.repo.ListProjectMemberWPSUserIDs(r.Context(), projectID)
+	memberIDs, err := h.repo.ListProjectMemberWPSUserIDs(c.Request.Context(), projectID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		writeJSON(c, http.StatusInternalServerError, map[string]string{
 			"error":   "list_members_failed",
 			"message": err.Error(),
 		})
@@ -269,47 +270,47 @@ func (h *WPSHandler) handleCreateProjectGroup(w http.ResponseWriter, r *http.Req
 	}
 	memberIDs = wps.FilterWPSUserIDs(memberIDs)
 
-	chat, err := h.wps.CreateGroupChat(r.Context(), accessToken, wps.CreateGroupChatInput{
+	chat, err := h.wps.CreateGroupChat(c.Request.Context(), accessToken, wps.CreateGroupChatInput{
 		Name:      groupName,
 		OwnerID:   owner.WPSUserID,
 		MemberIDs: memberIDs,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
+		writeJSON(c, http.StatusBadGateway, map[string]string{
 			"error":   "wps_create_chat_failed",
 			"message": err.Error(),
 		})
 		return
 	}
 
-	updated, err := h.repo.UpdateProjectSetup(r.Context(), projectID, repository.UpdateProjectSetupInput{
+	updated, err := h.repo.UpdateProjectSetup(c.Request.Context(), projectID, repository.UpdateProjectSetupInput{
 		WPSGroupID:   &chat.ID,
 		WPSGroupName: &chat.Name,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		writeJSON(c, http.StatusInternalServerError, map[string]string{
 			"error":   "update_project_failed",
 			"message": err.Error(),
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(c, http.StatusOK, map[string]any{
 		"chat":    chat,
 		"project": updated,
 	})
 }
 
-func (h *WPSHandler) handleSearchDocuments(w http.ResponseWriter, r *http.Request) {
-	accessToken, _, ok := h.accessToken(w, r)
+func (h *WPSHandler) handleSearchDocuments(c *gin.Context) {
+	accessToken, _, ok := h.accessToken(c)
 	if !ok {
 		return
 	}
-	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
+	keyword := strings.TrimSpace(c.Query("keyword"))
 	// Default: return all searchable docs. Pass smart_only=true to keep .otl / 智能文档 only.
-	smartOnly := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("smart_only"))) == "true"
-	items, err := h.wps.SearchDocuments(r.Context(), accessToken, keyword, 30, smartOnly)
+	smartOnly := strings.ToLower(strings.TrimSpace(c.Query("smart_only"))) == "true"
+	items, err := h.wps.SearchDocuments(c.Request.Context(), accessToken, keyword, 30, smartOnly)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{
+		writeJSON(c, http.StatusBadGateway, map[string]any{
 			"error":   "wps_documents_failed",
 			"message": err.Error(),
 			"hint":    wpsDocumentsPermissionHint(err),
@@ -319,7 +320,7 @@ func (h *WPSHandler) handleSearchDocuments(w http.ResponseWriter, r *http.Reques
 	if items == nil {
 		items = []wps.DocumentSummary{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(c, http.StatusOK, map[string]any{"items": items})
 }
 
 func wpsPermissionHint(err error) string {

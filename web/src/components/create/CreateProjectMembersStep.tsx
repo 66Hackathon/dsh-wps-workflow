@@ -36,7 +36,6 @@ function buildDraftFromMembers(
     const user = userMap.get(m.user_id) ?? {
       id: m.user_id,
       name: m.user_name,
-      nick_name: '',
       email: '',
     };
     return {
@@ -122,7 +121,7 @@ export function CreateProjectMembersStep({
     return orgUsers.filter((u) => {
       if (u.id === currentUserId) return false;
       if (!q) return true;
-      const name = userDisplayName(u.name, u.nick_name).toLowerCase();
+      const name = userDisplayName(u.name).toLowerCase();
       const email = (u.email ?? '').toLowerCase();
       return name.includes(q) || email.includes(q);
     });
@@ -245,7 +244,7 @@ export function CreateProjectMembersStep({
               <div className="tsw-memberSearchDropdown">
                 {filteredUsers.length ? filteredUsers.map((u) => {
                   const checked = draftUserIds.has(u.id);
-                  const label = userDisplayName(u.name, u.nick_name);
+                  const label = userDisplayName(u.name);
                   return (
                     <label key={u.id} className="tsw-memberSearchOption">
                       <input
@@ -286,7 +285,7 @@ export function CreateProjectMembersStep({
               </thead>
               <tbody>
                 {draftMembers.map((member) => {
-                  const label = userDisplayName(member.user.name, member.user.nick_name);
+                  const label = userDisplayName(member.user.name);
                   return (
                     <tr key={member.userId}>
                       <td>

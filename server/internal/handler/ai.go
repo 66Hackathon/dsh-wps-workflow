@@ -1,8 +1,9 @@
 package handler
 
 import (
+	"github.com/gin-gonic/gin"
+
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 )
@@ -31,13 +32,13 @@ func NewAIHandler() *AIHandler {
 	return &AIHandler{}
 }
 
-func (h *AIHandler) handleRun(w http.ResponseWriter, r *http.Request) {
+func (h *AIHandler) handleRun(c *gin.Context) {
 	var req AIRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
+	if err := c.ShouldBindJSON(&req); err != nil || req.Message == "" {
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
 		return
 	}
-	writeJSON(w, http.StatusOK, h.GenerateStub(r.Context(), req))
+	writeJSON(c, http.StatusOK, h.GenerateStub(c.Request.Context(), req))
 }
 
 // GenerateStub returns a placeholder AI response without calling DSH.

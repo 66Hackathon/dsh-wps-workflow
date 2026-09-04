@@ -27,6 +27,7 @@ func (r *Repository) SaveSession(ctx context.Context, row SessionRow) error {
 }
 
 // GetSession loads a session by id. Expired sessions are deleted.
+// On hit, touches updated_at to support sliding-expiry observability.
 func (r *Repository) GetSession(ctx context.Context, id string) (*SessionRow, error) {
 	if id == "" {
 		return nil, sql.ErrNoRows
@@ -43,6 +44,8 @@ func (r *Repository) GetSession(ctx context.Context, id string) (*SessionRow, er
 		_ = r.DeleteSession(ctx, id)
 		return nil, sql.ErrNoRows
 	}
+	_, _ = r.db.ExecContext(ctx, `
+		UPDATE user_sessions SET updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?`, id)
 	return &row, nil
 }
 

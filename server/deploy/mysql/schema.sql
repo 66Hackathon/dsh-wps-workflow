@@ -29,42 +29,36 @@ DROP TABLE IF EXISTS users;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
--- ── 用户 ─────────────────────────────────────────────────────────────────
-
+-- 用户表
 CREATE TABLE users (
-    id                      BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-    wps_user_id             VARCHAR(128) NOT NULL,
-    name                    VARCHAR(128) NOT NULL,
-    nick_name               VARCHAR(128) NULL,
-    avatar_url              VARCHAR(1000) NULL,
-    company_name            VARCHAR(255) NULL,
-    email                   VARCHAR(255) NULL,
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '系统用户ID',
+    wps_user_id VARCHAR(128) NOT NULL COMMENT 'WPS用户唯一标识',
+    name VARCHAR(128) NOT NULL COMMENT '用户名称',
+    avatar_url VARCHAR(1000) DEFAULT NULL COMMENT '头像地址',
+    company_name VARCHAR(255) DEFAULT NULL COMMENT '所属企业名称',
+    email VARCHAR(255) DEFAULT NULL COMMENT '用户邮箱',
+    wps_access_token TEXT DEFAULT NULL COMMENT 'WPS Access Token，应用层加密保存',
+    wps_refresh_token TEXT DEFAULT NULL COMMENT 'WPS Refresh Token，应用层加密保存',
+    wps_token_expires_at DATETIME(3) DEFAULT NULL COMMENT 'WPS Access Token过期时间',
+    wps_refresh_expires_at DATETIME(3) DEFAULT NULL COMMENT 'WPS Refresh Token过期时间',
+    account_state VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT '账号状态：ACTIVE/DISABLED',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_users_wps_user_id (wps_user_id),
+    KEY idx_users_account_state (account_state)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户及WPS授权信息表';
 
-    wps_access_token        TEXT NULL,
-    wps_refresh_token       TEXT NULL,
-    wps_token_expires_at    DATETIME(3) NULL,
-    wps_refresh_expires_at  DATETIME(3) NULL,
-
-    account_state           VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
-    first_login_at          DATETIME(3) NULL,
-    last_login_at           DATETIME(3) NULL,
-    created_at              DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at              DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
-                        ON UPDATE CURRENT_TIMESTAMP(3),
-
-    UNIQUE KEY uk_user_wps_id (wps_user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
+-- 用户会话表
 CREATE TABLE user_sessions (
-    id                  VARCHAR(64) PRIMARY KEY,
-    user_id             BIGINT UNSIGNED NOT NULL,
-    expires_at          DATETIME(3) NOT NULL,
-    created_at          DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at          DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
-                        ON UPDATE CURRENT_TIMESTAMP(3),
+    id VARCHAR(64) PRIMARY KEY COMMENT '随机生成的Session ID',
+    user_id BIGINT UNSIGNED NOT NULL COMMENT '关联users.id',
+    expires_at DATETIME(3) NOT NULL COMMENT 'Session过期时间',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT 'Session创建时间',
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT 'Session更新时间，可用于滑动过期',
     KEY idx_session_user (user_id),
     KEY idx_session_expires (expires_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户登录会话表';
 
 -- ── 项目 ─────────────────────────────────────────────────────────────────────
 
@@ -245,12 +239,12 @@ CREATE TABLE status_change_log (
 
 -- Bug 已整合进 requirements 表（item_type = 'BUG'），不再单独建表。
 
-INSERT INTO users (id, wps_user_id, name, nick_name, company_name, email, account_state) VALUES
-(1, 'demo-wps-user-001', '张产品', '小张', '演示企业', 'zhangsan@teamspace.local', 'ACTIVE'),
-(2, 'demo-wps-user-002', '李研发', '小李', '演示企业', 'lisi@teamspace.local', 'ACTIVE'),
-(3, 'demo-wps-user-003', '王测试', '小王', '演示企业', 'wangwu@teamspace.local', 'ACTIVE'),
-(4, 'demo-wps-user-004', '赵六', '小赵', '演示企业', 'zhaoliu@teamspace.local', 'ACTIVE'),
-(5, 'demo-wps-user-005', '孙七', '小孙', '演示企业', 'sunqi@teamspace.local', 'ACTIVE');
+INSERT INTO users (id, wps_user_id, name, company_name, email, account_state) VALUES
+(1, 'demo-wps-user-001', '张产品', '演示企业', 'zhangsan@teamspace.local', 'ACTIVE'),
+(2, 'demo-wps-user-002', '李研发', '演示企业', 'lisi@teamspace.local', 'ACTIVE'),
+(3, 'demo-wps-user-003', '王测试', '演示企业', 'wangwu@teamspace.local', 'ACTIVE'),
+(4, 'demo-wps-user-004', '赵六', '演示企业', 'zhaoliu@teamspace.local', 'ACTIVE'),
+(5, 'demo-wps-user-005', '孙七', '演示企业', 'sunqi@teamspace.local', 'ACTIVE');
 
 INSERT INTO projects (id, project_code, name, description, owner_user_id, status, setup_status, created_by)
 VALUES

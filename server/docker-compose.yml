@@ -18,7 +18,7 @@ services:
       MYSQL_DATABASE: ${TEAMSPACE_DB_NAME:-teamspace}
       TZ: UTC
     ports:
-      - "${TEAMSPACE_DB_PORT:-3306}:3306"
+      - "0.0.0.0:${TEAMSPACE_DB_PORT:-3306}:3306"
     volumes:
       - ./data/mysql:/var/lib/mysql
       - ./deploy/mysql:/docker-entrypoint-initdb.d:ro

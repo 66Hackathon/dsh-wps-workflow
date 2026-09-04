@@ -1,7 +1,8 @@
 package handler
 
 import (
-	"encoding/json"
+	"github.com/gin-gonic/gin"
+
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,24 +21,24 @@ func NewProjectHandler(repo *repository.Repository, auth *AuthHandler) *ProjectH
 	return &ProjectHandler{repo: repo, auth: auth}
 }
 
-func (h *ProjectHandler) handleGet(w http.ResponseWriter, r *http.Request) {
-	id, err := parsePathUint64(r, "id")
+func (h *ProjectHandler) handleGet(c *gin.Context) {
+	id, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
-	project, err := h.repo.GetProject(r.Context(), id)
+	project, err := h.repo.GetProject(c.Request.Context(), id)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": err.Error()})
+		writeJSON(c, http.StatusNotFound, map[string]string{"error": "not_found", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, project)
+	writeJSON(c, http.StatusOK, project)
 }
 
-func (h *ProjectHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
-	record, ok := sessionFromContext(r.Context())
+func (h *ProjectHandler) handleCreate(c *gin.Context) {
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
 
@@ -46,20 +47,20 @@ func (h *ProjectHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
 	if body.ProjectCode == "" || body.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_fields", "message": "project_code and name are required"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "missing_fields", "message": "project_code and name are required"})
 		return
 	}
 	if err := domain.ValidateProjectCreate(body.ProjectCode, body.Name, body.Description, record.User.ID); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_fields", "message": err.Error()})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_fields", "message": err.Error()})
 		return
 	}
 
-	projectID, err := h.repo.CreateProject(r.Context(), repository.CreateProjectInput{
+	projectID, err := h.repo.CreateProject(c.Request.Context(), repository.CreateProjectInput{
 		ProjectCode: body.ProjectCode,
 		Name:        body.Name,
 		Description: body.Description,
@@ -67,46 +68,46 @@ func (h *ProjectHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:   record.User.ID,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create_failed", "message": err.Error()})
+		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "create_failed", "message": err.Error()})
 		return
 	}
-	detail, err := h.repo.GetProject(r.Context(), projectID)
+	detail, err := h.repo.GetProject(c.Request.Context(), projectID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create_failed", "message": err.Error()})
+		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "create_failed", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusCreated, detail)
+	writeJSON(c, http.StatusCreated, detail)
 }
 
-func (h *ProjectHandler) handleListMembers(w http.ResponseWriter, r *http.Request) {
-	id, err := parsePathUint64(r, "id")
+func (h *ProjectHandler) handleListMembers(c *gin.Context) {
+	id, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
-	members, err := h.repo.ListProjectMembers(r.Context(), id)
+	members, err := h.repo.ListProjectMembers(c.Request.Context(), id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list_failed", "message": err.Error()})
+		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "list_failed", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": members})
+	writeJSON(c, http.StatusOK, map[string]any{"items": members})
 }
 
-func (h *ProjectHandler) handleAddMember(w http.ResponseWriter, r *http.Request) {
-	record, ok := sessionFromContext(r.Context())
+func (h *ProjectHandler) handleAddMember(c *gin.Context) {
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
 
-	projectID, err := parsePathUint64(r, "id")
+	projectID, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
 
-	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
-		writeForbidden(w, err)
+	if err := h.requireProjectManager(c, projectID, record.User.ID); err != nil {
+		writeForbidden(c, err)
 		return
 	}
 
@@ -115,26 +116,26 @@ func (h *ProjectHandler) handleAddMember(w http.ResponseWriter, r *http.Request)
 		RoleCodes []string `json:"role_codes"`
 		RoleCode  string   `json:"role_code"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
 	if len(body.RoleCodes) == 0 && body.RoleCode != "" {
 		body.RoleCodes = legacyRoleToUI(body.RoleCode)
 	}
 	if err := domain.ValidateAddProjectMember(body.UserID, body.RoleCodes); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_fields", "message": err.Error()})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_fields", "message": err.Error()})
 		return
 	}
 
-	targetUser, err := h.repo.GetUserByID(r.Context(), body.UserID)
+	targetUser, err := h.repo.GetUserByID(c.Request.Context(), body.UserID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "user_not_found", "message": "user not found"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "user_not_found", "message": "user not found"})
 		return
 	}
 	_ = targetUser
 
-	member, err := h.repo.AddProjectMember(r.Context(), repository.AddProjectMemberInput{
+	member, err := h.repo.AddProjectMember(c.Request.Context(), repository.AddProjectMemberInput{
 		ProjectID: projectID,
 		UserID:    body.UserID,
 		RoleCodes: body.RoleCodes,
@@ -142,35 +143,35 @@ func (h *ProjectHandler) handleAddMember(w http.ResponseWriter, r *http.Request)
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "already a project member") {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "duplicate_member", "message": err.Error()})
+			writeJSON(c, http.StatusConflict, map[string]string{"error": "duplicate_member", "message": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "add_failed", "message": err.Error()})
+		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "add_failed", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusCreated, member)
+	writeJSON(c, http.StatusCreated, member)
 }
 
-func (h *ProjectHandler) handleUpdateMember(w http.ResponseWriter, r *http.Request) {
-	record, ok := sessionFromContext(r.Context())
+func (h *ProjectHandler) handleUpdateMember(c *gin.Context) {
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
 
-	projectID, err := parsePathUint64(r, "id")
+	projectID, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
-	memberID, err := parsePathUint64(r, "memberId")
+	memberID, err := parsePathUint64(c, "memberId")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_member_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_member_id"})
 		return
 	}
 
-	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
-		writeForbidden(w, err)
+	if err := h.requireProjectManager(c, projectID, record.User.ID); err != nil {
+		writeForbidden(c, err)
 		return
 	}
 
@@ -178,70 +179,70 @@ func (h *ProjectHandler) handleUpdateMember(w http.ResponseWriter, r *http.Reque
 		RoleCodes []string `json:"role_codes"`
 		RoleCode  string   `json:"role_code"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
 	if len(body.RoleCodes) == 0 && body.RoleCode != "" {
 		body.RoleCodes = legacyRoleToUI(body.RoleCode)
 	}
 	if err := domain.ValidateUIRoles(body.RoleCodes, false); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_fields", "message": err.Error()})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_fields", "message": err.Error()})
 		return
 	}
 
-	member, err := h.repo.UpdateProjectMemberRoles(r.Context(), projectID, memberID, body.RoleCodes)
+	member, err := h.repo.UpdateProjectMemberRoles(c.Request.Context(), projectID, memberID, body.RoleCodes)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": err.Error()})
+			writeJSON(c, http.StatusNotFound, map[string]string{"error": "not_found", "message": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "update_failed", "message": err.Error()})
+		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "update_failed", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, member)
+	writeJSON(c, http.StatusOK, member)
 }
 
-func (h *ProjectHandler) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
-	record, ok := sessionFromContext(r.Context())
+func (h *ProjectHandler) handleRemoveMember(c *gin.Context) {
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
 
-	projectID, err := parsePathUint64(r, "id")
+	projectID, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
-	memberID, err := parsePathUint64(r, "memberId")
+	memberID, err := parsePathUint64(c, "memberId")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_member_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_member_id"})
 		return
 	}
 
-	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
-		writeForbidden(w, err)
+	if err := h.requireProjectManager(c, projectID, record.User.ID); err != nil {
+		writeForbidden(c, err)
 		return
 	}
 
-	if err := h.repo.RemoveProjectMember(r.Context(), projectID, memberID); err != nil {
+	if err := h.repo.RemoveProjectMember(c.Request.Context(), projectID, memberID); err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": err.Error()})
+			writeJSON(c, http.StatusNotFound, map[string]string{"error": "not_found", "message": err.Error()})
 			return
 		}
 		if strings.Contains(err.Error(), "sole project manager") {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_operation", "message": err.Error()})
+			writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_operation", "message": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "remove_failed", "message": err.Error()})
+		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "remove_failed", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	writeJSON(c, http.StatusOK, map[string]string{"status": "removed"})
 }
 
-func (h *ProjectHandler) requireProjectManager(r *http.Request, projectID, userID uint64) error {
-	ok, err := h.repo.MemberCanManageProject(r.Context(), projectID, userID)
+func (h *ProjectHandler) requireProjectManager(c *gin.Context, projectID, userID uint64) error {
+	ok, err := h.repo.MemberCanManageProject(c.Request.Context(), projectID, userID)
 	if err != nil {
 		return err
 	}
@@ -260,8 +261,8 @@ func legacyRoleToUI(roleCode string) []string {
 	}
 }
 
-func (h *ProjectHandler) requireProjectOwner(r *http.Request, projectID, userID uint64) error {
-	return h.requireProjectManager(r, projectID, userID)
+func (h *ProjectHandler) requireProjectOwner(c *gin.Context, projectID, userID uint64) error {
+	return h.requireProjectManager(c, projectID, userID)
 }
 
 var errNotProjectOwner = &forbiddenError{message: "only project manager can manage members"}
@@ -274,29 +275,29 @@ func (e *forbiddenError) Error() string {
 	return e.message
 }
 
-func writeForbidden(w http.ResponseWriter, err error) {
+func writeForbidden(c *gin.Context, err error) {
 	if fe, ok := err.(*forbiddenError); ok {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden", "message": fe.message})
+		writeJSON(c, http.StatusForbidden, map[string]string{"error": "forbidden", "message": fe.message})
 		return
 	}
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "check_failed", "message": err.Error()})
+	writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "check_failed", "message": err.Error()})
 }
 
-func (h *ProjectHandler) handleUpdateSetup(w http.ResponseWriter, r *http.Request) {
-	record, ok := sessionFromContext(r.Context())
+func (h *ProjectHandler) handleUpdateSetup(c *gin.Context) {
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
 
-	projectID, err := parsePathUint64(r, "id")
+	projectID, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
 
-	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
-		writeForbidden(w, err)
+	if err := h.requireProjectManager(c, projectID, record.User.ID); err != nil {
+		writeForbidden(c, err)
 		return
 	}
 
@@ -306,12 +307,12 @@ func (h *ProjectHandler) handleUpdateSetup(w http.ResponseWriter, r *http.Reques
 		WPSGroupID   *string `json:"wps_group_id"`
 		WPSGroupName *string `json:"wps_group_name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
 
-	project, err := h.repo.UpdateProjectSetup(r.Context(), projectID, repository.UpdateProjectSetupInput{
+	project, err := h.repo.UpdateProjectSetup(c.Request.Context(), projectID, repository.UpdateProjectSetupInput{
 		Name:         body.Name,
 		Description:  body.Description,
 		WPSGroupID:   body.WPSGroupID,
@@ -323,61 +324,61 @@ func (h *ProjectHandler) handleUpdateSetup(w http.ResponseWriter, r *http.Reques
 		if strings.Contains(msg, "required") {
 			status = http.StatusBadRequest
 		}
-		writeJSON(w, status, map[string]string{"error": "update_failed", "message": msg})
+		writeJSON(c, status, map[string]string{"error": "update_failed", "message": msg})
 		return
 	}
-	writeJSON(w, http.StatusOK, project)
+	writeJSON(c, http.StatusOK, project)
 }
 
-func (h *ProjectHandler) handleDelete(w http.ResponseWriter, r *http.Request) {
-	record, ok := sessionFromContext(r.Context())
+func (h *ProjectHandler) handleDelete(c *gin.Context) {
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	projectID, err := parsePathUint64(r, "id")
+	projectID, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
-	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
-		writeForbidden(w, err)
+	if err := h.requireProjectManager(c, projectID, record.User.ID); err != nil {
+		writeForbidden(c, err)
 		return
 	}
-	if err := h.repo.DeleteProject(r.Context(), projectID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delete_failed", "message": err.Error()})
+	if err := h.repo.DeleteProject(c.Request.Context(), projectID); err != nil {
+		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "delete_failed", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	writeJSON(c, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-func (h *ProjectHandler) handleListRepositories(w http.ResponseWriter, r *http.Request) {
-	projectID, err := parsePathUint64(r, "id")
+func (h *ProjectHandler) handleListRepositories(c *gin.Context) {
+	projectID, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
-	items, err := h.repo.ListProjectRepositories(r.Context(), projectID)
+	items, err := h.repo.ListProjectRepositories(c.Request.Context(), projectID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list_failed", "message": err.Error()})
+		writeJSON(c, http.StatusInternalServerError, map[string]string{"error": "list_failed", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(c, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *ProjectHandler) handleCreateRepository(w http.ResponseWriter, r *http.Request) {
-	record, ok := sessionFromContext(r.Context())
+func (h *ProjectHandler) handleCreateRepository(c *gin.Context) {
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	projectID, err := parsePathUint64(r, "id")
+	projectID, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
-	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
-		writeForbidden(w, err)
+	if err := h.requireProjectManager(c, projectID, record.User.ID); err != nil {
+		writeForbidden(c, err)
 		return
 	}
 
@@ -388,12 +389,12 @@ func (h *ProjectHandler) handleCreateRepository(w http.ResponseWriter, r *http.R
 		DevDirection  string `json:"dev_direction"`
 		SortOrder     uint32 `json:"sort_order"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
 
-	item, err := h.repo.CreateProjectRepository(r.Context(), repository.CreateProjectRepositoryInput{
+	item, err := h.repo.CreateProjectRepository(c.Request.Context(), repository.CreateProjectRepositoryInput{
 		ProjectID:     projectID,
 		RepoName:      body.RepoName,
 		RepoURL:       body.RepoURL,
@@ -402,25 +403,25 @@ func (h *ProjectHandler) handleCreateRepository(w http.ResponseWriter, r *http.R
 		SortOrder:     body.SortOrder,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "create_failed", "message": err.Error()})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "create_failed", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeJSON(c, http.StatusCreated, item)
 }
 
-func (h *ProjectHandler) handleReplaceRepositories(w http.ResponseWriter, r *http.Request) {
-	record, ok := sessionFromContext(r.Context())
+func (h *ProjectHandler) handleReplaceRepositories(c *gin.Context) {
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	projectID, err := parsePathUint64(r, "id")
+	projectID, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
-	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
-		writeForbidden(w, err)
+	if err := h.requireProjectManager(c, projectID, record.User.ID); err != nil {
+		writeForbidden(c, err)
 		return
 	}
 
@@ -433,8 +434,8 @@ func (h *ProjectHandler) handleReplaceRepositories(w http.ResponseWriter, r *htt
 			SortOrder     uint32 `json:"sort_order"`
 		} `json:"items"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
 
@@ -454,32 +455,32 @@ func (h *ProjectHandler) handleReplaceRepositories(w http.ResponseWriter, r *htt
 		})
 	}
 
-	items, err := h.repo.ReplaceProjectRepositories(r.Context(), projectID, inputs)
+	items, err := h.repo.ReplaceProjectRepositories(c.Request.Context(), projectID, inputs)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "replace_failed", "message": err.Error()})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "replace_failed", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(c, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *ProjectHandler) handleUpdateRepository(w http.ResponseWriter, r *http.Request) {
-	record, ok := sessionFromContext(r.Context())
+func (h *ProjectHandler) handleUpdateRepository(c *gin.Context) {
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	projectID, err := parsePathUint64(r, "id")
+	projectID, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
-	repoID, err := parsePathUint64(r, "repoId")
+	repoID, err := parsePathUint64(c, "repoId")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_repo_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_repo_id"})
 		return
 	}
-	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
-		writeForbidden(w, err)
+	if err := h.requireProjectManager(c, projectID, record.User.ID); err != nil {
+		writeForbidden(c, err)
 		return
 	}
 
@@ -490,12 +491,12 @@ func (h *ProjectHandler) handleUpdateRepository(w http.ResponseWriter, r *http.R
 		DevDirection  *string `json:"dev_direction"`
 		SortOrder     *uint32 `json:"sort_order"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
 
-	item, err := h.repo.UpdateProjectRepository(r.Context(), projectID, repoID, repository.UpdateProjectRepositoryInput{
+	item, err := h.repo.UpdateProjectRepository(c.Request.Context(), projectID, repoID, repository.UpdateProjectRepositoryInput{
 		RepoName:      body.RepoName,
 		RepoURL:       body.RepoURL,
 		DefaultBranch: body.DefaultBranch,
@@ -507,46 +508,46 @@ func (h *ProjectHandler) handleUpdateRepository(w http.ResponseWriter, r *http.R
 		if strings.Contains(err.Error(), "not found") {
 			status = http.StatusNotFound
 		}
-		writeJSON(w, status, map[string]string{"error": "update_failed", "message": err.Error()})
+		writeJSON(c, status, map[string]string{"error": "update_failed", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeJSON(c, http.StatusOK, item)
 }
 
-func (h *ProjectHandler) handleDeleteRepository(w http.ResponseWriter, r *http.Request) {
-	record, ok := sessionFromContext(r.Context())
+func (h *ProjectHandler) handleDeleteRepository(c *gin.Context) {
+	record, ok := sessionFromContext(c.Request.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(c, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	projectID, err := parsePathUint64(r, "id")
+	projectID, err := parsePathUint64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
-	repoID, err := parsePathUint64(r, "repoId")
+	repoID, err := parsePathUint64(c, "repoId")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_repo_id"})
+		writeJSON(c, http.StatusBadRequest, map[string]string{"error": "invalid_repo_id"})
 		return
 	}
-	if err := h.requireProjectManager(r, projectID, record.User.ID); err != nil {
-		writeForbidden(w, err)
+	if err := h.requireProjectManager(c, projectID, record.User.ID); err != nil {
+		writeForbidden(c, err)
 		return
 	}
 
-	if err := h.repo.DeleteProjectRepository(r.Context(), projectID, repoID); err != nil {
+	if err := h.repo.DeleteProjectRepository(c.Request.Context(), projectID, repoID); err != nil {
 		status := http.StatusBadRequest
 		if strings.Contains(err.Error(), "not found") {
 			status = http.StatusNotFound
 		}
-		writeJSON(w, status, map[string]string{"error": "delete_failed", "message": err.Error()})
+		writeJSON(c, status, map[string]string{"error": "delete_failed", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	writeJSON(c, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-func parsePathUint64(r *http.Request, key string) (uint64, error) {
-	raw := r.PathValue(key)
+func parsePathUint64(c *gin.Context, key string) (uint64, error) {
+	raw := c.Param(key)
 	if raw == "" {
 		return 0, strconv.ErrSyntax
 	}

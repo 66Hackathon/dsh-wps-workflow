@@ -2,8 +2,9 @@ package handler
 
 import (
 	"context"
-	"log"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/66hackathon/dsh-wps-workflow/server/internal/auth/session"
 	"github.com/66hackathon/dsh-wps-workflow/server/internal/repository"
@@ -23,7 +24,7 @@ func (h *AuthHandler) ensureFreshWPSTokens(ctx context.Context, userID uint64) {
 
 	token, err := h.deps.WPS.RefreshAccessToken(renewCtx, tokens.RefreshToken)
 	if err != nil {
-		log.Printf("wps token refresh failed user=%d: %v", userID, err)
+		h.log().Warn("wps token refresh failed", zap.Uint64("user_id", userID), zap.Error(err))
 		return
 	}
 
@@ -47,8 +48,15 @@ func (h *AuthHandler) ensureFreshWPSTokens(ctx context.Context, userID uint64) {
 	}
 
 	if err := h.deps.Repo.UpdateUserWPSTokens(ctx, userID, newTokens); err != nil {
-		log.Printf("persist refreshed wps tokens failed user=%d: %v", userID, err)
+		h.log().Warn("persist refreshed wps tokens failed", zap.Uint64("user_id", userID), zap.Error(err))
 	}
+}
+
+func (h *AuthHandler) log() *zap.Logger {
+	if h.deps.Log != nil {
+		return h.deps.Log
+	}
+	return zap.NewNop()
 }
 
 func needsWPSTokenRefresh(tokens repository.WPSTokens, lead time.Duration) bool {

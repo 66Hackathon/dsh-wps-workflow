@@ -78,24 +78,24 @@ type documentSearchData struct {
 type documentSearchHit struct {
 	File *documentFile `json:"file"`
 	// Some deployments may flatten fields onto the hit; keep as fallback.
-	ID      string    `json:"id"`
-	Name    string    `json:"name"`
-	Type    string    `json:"type"`
-	DriveID string    `json:"drive_id"`
-	MTime   any       `json:"mtime"`
-	Link    *linkInfo `json:"link"`
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Type     string    `json:"type"`
+	DriveID  string    `json:"drive_id"`
+	MTime    any       `json:"mtime"`
+	Link     *linkInfo `json:"link"`
 	LinkInfo *linkInfo `json:"link_info"`
 }
 
 type documentFile struct {
-	ID      string    `json:"id"`
-	Name    string    `json:"name"`
-	Type    string    `json:"type"`
-	DriveID string    `json:"drive_id"`
-	MTime   any       `json:"mtime"`
-	LinkID  string    `json:"link_id"`
-	LinkURL string    `json:"link_url"`
-	Link    *linkInfo `json:"link"`
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Type     string    `json:"type"`
+	DriveID  string    `json:"drive_id"`
+	MTime    any       `json:"mtime"`
+	LinkID   string    `json:"link_id"`
+	LinkURL  string    `json:"link_url"`
+	Link     *linkInfo `json:"link"`
 	LinkInfo *linkInfo `json:"link_info"`
 }
 

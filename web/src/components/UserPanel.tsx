@@ -5,10 +5,8 @@ import type { OrgUser, TeamspaceUser } from '../types';
 import { PROJECT_ROLE_LABELS } from '../types';
 
 export function userDisplayName(
-  user: Pick<TeamspaceUser, 'id' | 'name' | 'nick_name'> | null | undefined,
+  user: Pick<TeamspaceUser, 'id' | 'name'> | null | undefined,
 ): string {
-  const nick = String(user?.nick_name ?? '').trim();
-  if (nick) return nick;
   return String(user?.name ?? user?.id ?? '').trim();
 }
 
@@ -18,7 +16,7 @@ export function userRoleLabel(user: TeamspaceUser | null | undefined): string {
 }
 
 export function userInitial(
-  user: Pick<TeamspaceUser, 'id' | 'name' | 'nick_name'> | null | undefined,
+  user: Pick<TeamspaceUser, 'id' | 'name'> | null | undefined,
 ): string {
   const name = userDisplayName(user);
   return name.slice(0, 1) || '?';
@@ -66,8 +64,7 @@ const DEV_USER_ROLE_HINTS: Record<number, string> = {
 };
 
 function devUserLabel(user: OrgUser): string {
-  const nick = user.nick_name?.trim();
-  return nick || user.name;
+  return user.name;
 }
 
 function DevUserPicker({

@@ -1,6 +1,6 @@
 # TeamSpace 业务服务
 
-DSH TeamSpace 的独立 HTTP 服务：MySQL 持久化、REST API，供独立 Web 前端（`../web/`）访问。
+DSH TeamSpace 的独立 HTTP 服务：基于 **Gin** + **zap**，MySQL 持久化、REST API，供独立 Web 前端（`../web/`）访问。
 
 默认监听 `http://127.0.0.1:8090`。
 
@@ -43,7 +43,7 @@ DSH TeamSpace 的独立 HTTP 服务：MySQL 持久化、REST API，供独立 Web
 6. 前端每 5 分钟调用 `GET /api/auth/status` 触发静默保活
 7. `refresh_token` 过期后需重新登录
 
-**users 表核心字段**：`wps_user_id`、`name`、`nick_name`、`avatar_url`、`company_name`；WPS OAuth token 存同表便于后续调用 WPS API。
+**users 表核心字段**：`wps_user_id`、`name`、`avatar_url`、`company_name`、`email`；WPS OAuth token 存同表便于后续调用 WPS API。
 
 完整分步验收见 [`../ARCHITECTURE.md`](../ARCHITECTURE.md)。
 
@@ -113,6 +113,9 @@ make run
 | `WPS_OAUTH_REFRESH_LEAD_SEC` | `300` | access_token 到期前多少秒自动续期 |
 | `TEAMSPACE_SESSION_SECRET` | `change-me-in-production` | Session 密钥（预留） |
 | `TEAMSPACE_FRONTEND_REDIRECT_URL` | `http://127.0.0.1:5173` | OAuth 成功后跳回独立 Web（携带 `?token=`） |
+| `TEAMSPACE_LOG_LEVEL` | `info` | zap 日志级别：`debug` / `info` / `warn` / `error` |
+| `TEAMSPACE_LOG_ENCODING` | 空 | `json` 或 `console`；留空时 DevMode 用 console，否则 json |
+| `TEAMSPACE_DEV_MODE` | `false` | 开发模式（演示登录、Gin DebugMode） |
 
 ## WPS OAuth 配置
 
@@ -141,13 +144,18 @@ cd ../web && npm install && npm run dev
 
 ```text
 server/
-├── cmd/teamspace/          # 入口
+├── cmd/teamspace/              # 入口
 ├── internal/
-│   ├── config/             # 环境变量
-│   ├── handler/            # HTTP 路由
-│   └── repository/         # MySQL
+│   ├── config/                 # 环境变量配置
+│   ├── middleware/             # Gin 中间件（CORS / zap 访问日志 / Recovery）
+│   ├── router/                 # Gin Engine 组装
+│   ├── handler/                # HTTP Handler（gin.HandlerFunc）
+│   ├── domain/                 # 领域规则
+│   ├── repository/             # MySQL 数据访问
+│   ├── auth/                   # WPS OAuth / Session
+│   └── pkg/logger/             # zap 日志封装
 ├── deploy/mysql/
-│   └── schema.sql          # 权威全量建表（每次 init 重建）
+│   └── schema.sql              # 权威全量建表（每次 init 重建）
 ├── Dockerfile
 ├── docker-compose.yml
 └── Makefile

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"strings"
-	"time"
 )
 
 // WPSContactInput holds minimal WPS contact data for local user provisioning.
@@ -29,7 +28,6 @@ func (r *Repository) EnsureUsersFromWPSContacts(ctx context.Context, contacts []
 	defer func() { _ = tx.Rollback() }()
 
 	items := make([]OrgUser, 0, len(contacts))
-	now := time.Now().UTC()
 
 	for _, contact := range contacts {
 		wpsUserID := strings.TrimSpace(contact.WPSUserID)
@@ -53,14 +51,11 @@ func (r *Repository) EnsureUsersFromWPSContacts(ctx context.Context, contacts []
 		if err == sql.ErrNoRows {
 			result, insertErr := tx.ExecContext(ctx, `
 				INSERT INTO users (
-					wps_user_id, name, nick_name, avatar_url, email,
-					account_state, first_login_at, last_login_at
-				) VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`,
+					wps_user_id, name, avatar_url, email, account_state
+				) VALUES (?, ?, ?, ?, 'ACTIVE')`,
 				wpsUserID, displayName,
-				nullIfEmpty(strings.TrimSpace(contact.NickName)),
 				nullIfEmpty(strings.TrimSpace(contact.AvatarURL)),
-				nullIfEmpty(strings.TrimSpace(contact.Email)),
-				now, now)
+				nullIfEmpty(strings.TrimSpace(contact.Email)))
 			if insertErr != nil {
 				return nil, insertErr
 			}
@@ -72,13 +67,12 @@ func (r *Repository) EnsureUsersFromWPSContacts(ctx context.Context, contacts []
 		} else {
 			_, updateErr := tx.ExecContext(ctx, `
 				UPDATE users SET
-					name = ?, nick_name = COALESCE(NULLIF(?, ''), nick_name),
+					name = ?,
 					avatar_url = COALESCE(NULLIF(?, ''), avatar_url),
 					email = COALESCE(NULLIF(?, ''), email),
 					account_state = 'ACTIVE'
 				WHERE id = ?`,
 				displayName,
-				strings.TrimSpace(contact.NickName),
 				strings.TrimSpace(contact.AvatarURL),
 				strings.TrimSpace(contact.Email),
 				userID)
@@ -89,9 +83,9 @@ func (r *Repository) EnsureUsersFromWPSContacts(ctx context.Context, contacts []
 
 		var item OrgUser
 		err = tx.QueryRowContext(ctx, `
-			SELECT id, name, IFNULL(nick_name, ''), IFNULL(email, '')
+			SELECT id, name, IFNULL(email, '')
 			FROM users WHERE id = ? LIMIT 1`, userID).
-			Scan(&item.ID, &item.Name, &item.NickName, &item.Email)
+			Scan(&item.ID, &item.Name, &item.Email)
 		if err != nil {
 			return nil, err
 		}

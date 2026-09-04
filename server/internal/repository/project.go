@@ -312,7 +312,7 @@ func (r *Repository) AddProjectMember(ctx context.Context, input AddProjectMembe
 
 	var userName string
 	err = tx.QueryRowContext(ctx, `
-		SELECT COALESCE(NULLIF(nick_name, ''), name) FROM users WHERE id = ?`, input.UserID).
+		SELECT name FROM users WHERE id = ?`, input.UserID).
 		Scan(&userName)
 	if err != nil {
 		return ProjectMember{}, err
